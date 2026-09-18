@@ -1,7 +1,7 @@
 import { findEvent } from '../game/events';
 import { daysOut } from '../game/fleets';
-import { TRAVEL_DAYS } from '../game/state';
 import { CONTROLLER_LABEL, SYSTEMS, systemName } from '../game/systems';
+import { travelDays } from '../game/travel';
 import type { SystemDef } from '../game/systems';
 import type { Fleet } from '../game/types';
 import DecisionCard from './DecisionCard';
@@ -40,7 +40,9 @@ interface MilitaryProps {
 
 function MilitaryTab({ system, daysElapsed, fleets, onAssignFleet }: MilitaryProps) {
   const stationed = fleets.filter((f) => f.location === system.id);
-  const inbound = fleets.filter((f) => f.destination === system.id);
+  // Fleets that departed from this system and are currently between here and
+  // wherever they were sent — this system's own record of where its ships are.
+  const transiting = fleets.filter((f) => f.origin === system.id);
   const destinations = SYSTEMS.filter((s) => s.id !== system.id);
 
   return (
@@ -51,21 +53,24 @@ function MilitaryTab({ system, daysElapsed, fleets, onAssignFleet }: MilitaryPro
 
       <section className="tab-section">
         <h4>Fleets</h4>
-        {stationed.length === 0 && inbound.length === 0 && (
-          <p className="quiet">No fleets stationed here or inbound.</p>
+        {stationed.length === 0 && transiting.length === 0 && (
+          <p className="quiet">No fleets stationed here or in transit from here.</p>
         )}
 
-        {inbound.map((fleet) => (
-          <p key={fleet.id} className="quiet">
-            {fleet.name} inbound from {systemName(fleet.origin)}, {daysOut(fleet, daysElapsed)} day
-            {daysOut(fleet, daysElapsed) === 1 ? '' : 's'} out.
-          </p>
-        ))}
+        {transiting.map((fleet) => {
+          const remaining = daysOut(fleet, daysElapsed);
+          return (
+            <p key={fleet.id} className="quiet">
+              {fleet.name} en route to {systemName(fleet.destination)}, {remaining} day
+              {remaining === 1 ? '' : 's'} remaining.
+            </p>
+          );
+        })}
 
         {stationed.map((fleet) => (
           <div key={fleet.id} className="fleet-order">
             <p className="fleet-name">{fleet.name} — stationed</p>
-            <p className="quiet">Assign a destination ({TRAVEL_DAYS} days in transit):</p>
+            <p className="quiet">Assign a destination:</p>
             <div className="fleet-buttons">
               {destinations.map((target) => (
                 <button
@@ -73,7 +78,7 @@ function MilitaryTab({ system, daysElapsed, fleets, onAssignFleet }: MilitaryPro
                   className="ghost"
                   onClick={() => onAssignFleet(fleet.id, target.id)}
                 >
-                  Send to {target.name}
+                  Send to {target.name} · {travelDays(system.id, target.id)}d
                 </button>
               ))}
             </div>

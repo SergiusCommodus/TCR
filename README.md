@@ -80,11 +80,31 @@ reaches it.
 
 ## Fleets
 
-A stub, with no combat. Two fleets start at Sol and Anchorage. A stationed
-fleet's Military tab offers a button per other system; ordering one schedules an
-arrival `TRAVEL_DAYS` (6) in the future. Transit is stored as absolute
-`departureDay` and `arrivalDay` rather than a countdown, so it is drift free
-like the rest of the clock. A fleet in transit slides along its lane on the map.
+A stub, with no combat. Two fleets start at Sol and Anchorage, using the
+existing First Fleet / Third Fleet names.
+
+A system's Military tab shows any fleet stationed there and any fleet that
+departed *from* there and is still in transit (its destination and days
+remaining). A stationed fleet's tab offers a "Send to..." button per other
+system, each labelled with that pair's travel time. Assigning one schedules an
+arrival using the flat per-pair table in `src/game/travel.ts` — placeholder
+values from 3 to 10 days, loosely following how far apart the systems sit on
+the map, not real distance, kept as plain data so they're easy to retune.
+Transit is stored as absolute `departureDay` and `arrivalDay` rather than a
+countdown, so it's drift free like the rest of the clock; `daysOut` in
+`src/game/fleets.ts` derives the remaining days from those against the current
+clock reading.
+
+A fleet in transit renders as a marker that slides along the dotted lane
+between its origin and destination, in proportion to elapsed vs. total travel
+time; the map now draws a lane between every pair of systems (not just from
+Sol) so any route a fleet is sent on has a line to travel along.
+
+On arrival the fleet becomes stationed at its destination and the arrival is
+logged like everything else. If the destination is Directorate controlled, the
+log line is distinct — "First Fleet arrives at New Virginia. Directorate
+forces detected in system." — rather than a plain arrival line. This is a log
+only distinction: no combat, no new game state, just a hook for later.
 
 ## Data model
 
@@ -119,5 +139,6 @@ concerns. An event id missing from that map falls back to `'global'`.
 - `src/game/state.ts` — the clock, the reducer, upkeep, delayed effects, fleets.
 - `src/game/systems.ts` — systems, controllers, map positions, event scope.
 - `src/game/fleets.ts` — transit helpers shared by the map and the panel.
+- `src/game/travel.ts` — the per-pair travel time table and lane list.
 - `src/components/` — `SystemMap`, `SystemPanel` (tabs), `SpeedControls`,
   `DecisionCard` (shared by the Political tab and the national banner).

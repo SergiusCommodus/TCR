@@ -1,5 +1,6 @@
-import { HOME_SYSTEM_ID, SYSTEMS, systemById } from '../game/systems';
+import { SYSTEMS, systemById } from '../game/systems';
 import { daysOut } from '../game/fleets';
+import { systemPairs } from '../game/travel';
 import type { Fleet } from '../game/types';
 
 interface Props {
@@ -10,7 +11,11 @@ interface Props {
   onSelect: (systemId: string) => void;
 }
 
-const HOME = systemById(HOME_SYSTEM_ID);
+const LANES = systemPairs()
+  .map(([a, b]) => [systemById(a), systemById(b)] as const)
+  .filter((pair): pair is readonly [NonNullable<(typeof pair)[0]>, NonNullable<(typeof pair)[1]>] =>
+    Boolean(pair[0] && pair[1]),
+  );
 
 function transitPosition(fleet: Fleet, daysElapsed: number) {
   const from = systemById(fleet.origin);
@@ -36,17 +41,16 @@ export default function SystemMap({
   return (
     <div className="map" role="group" aria-label="Local space">
       <svg className="lanes" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-        {HOME &&
-          SYSTEMS.filter((s) => s.id !== HOME_SYSTEM_ID).map((s) => (
-            <line
-              key={s.id}
-              x1={HOME.x}
-              y1={HOME.y}
-              x2={s.x}
-              y2={s.y}
-              vectorEffect="non-scaling-stroke"
-            />
-          ))}
+        {LANES.map(([a, b]) => (
+          <line
+            key={`${a.id}-${b.id}`}
+            x1={a.x}
+            y1={a.y}
+            x2={b.x}
+            y2={b.y}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
       </svg>
 
       {fleets.map((fleet) => {

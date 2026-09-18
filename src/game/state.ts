@@ -1,5 +1,6 @@
 import { EVENTS, findEvent } from './events';
-import { HOME_SYSTEM_ID, systemName } from './systems';
+import { HOME_SYSTEM_ID, systemById, systemName } from './systems';
+import { travelDays } from './travel';
 import type {
   Effects,
   EventDef,
@@ -15,9 +16,6 @@ import type {
 export const MS_PER_GAME_DAY = 60_000;
 
 export const SPEEDS: Speed[] = [0, 1, 2, 3, 4, 5];
-
-/** In game days a fleet spends in transit between any two systems. */
-export const TRAVEL_DAYS = 6;
 
 /** Chance per day that an eligible random event fires. */
 const RANDOM_EVENT_CHANCE = 0.5;
@@ -157,10 +155,16 @@ function runClock(session: GameSession, realMs: number): GameSession {
 
     fleets = fleets.map((fleet) => {
       if (!fleet.destination || fleet.arrivalDay > atDay) return fleet;
-      log.push(
-        `Day ${dayLabel(fleet.arrivalDay)} — ${fleet.name} arrives at ` +
-          `${systemName(fleet.destination)}.`,
-      );
+      const destination = systemById(fleet.destination);
+      // A hook for later: no combat yet, just a distinct line when the fleet
+      // arrives somewhere the Directorate holds.
+      const arrivalLine =
+        destination?.controller === 'directorate'
+          ? `Day ${dayLabel(fleet.arrivalDay)} — ${fleet.name} arrives at ` +
+            `${systemName(fleet.destination)}. Directorate forces detected in system.`
+          : `Day ${dayLabel(fleet.arrivalDay)} — ${fleet.name} arrives at ` +
+            `${systemName(fleet.destination)}.`;
+      log.push(arrivalLine);
       return {
         ...fleet,
         location: fleet.destination,
@@ -268,10 +272,11 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
       if (fleet.location === action.destinationId) return session;
 
       const days = session.state.daysElapsed;
+      const eta = travelDays(fleet.location, action.destinationId);
       const log = [
         ...session.state.log,
         `Day ${dayLabel(days)} — ${fleet.name} ordered from ${systemName(fleet.location)} to ` +
-          `${systemName(action.destinationId)}; ETA ${TRAVEL_DAYS} days.`,
+          `${systemName(action.destinationId)}; ETA ${eta} days.`,
       ];
 
       return {
@@ -285,7 +290,7 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
                 origin: fleet.location,
                 destination: action.destinationId,
                 departureDay: days,
-                arrivalDay: days + TRAVEL_DAYS,
+                arrivalDay: days + eta,
               }
             : f,
         ),
