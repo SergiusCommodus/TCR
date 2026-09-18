@@ -87,3 +87,25 @@ export function describeComposition(composition: ShipComposition): string {
 export function fleetLabel(fleet: Fleet): string {
   return `${fleet.name}: ${describeComposition(fleet.composition)}`;
 }
+
+/** A fleet's total combat strength: the sum of each ship's count times its
+ *  type's strength. */
+export function fleetStrength(composition: ShipComposition): number {
+  return (Object.keys(SHIP_TYPES) as ShipType[]).reduce(
+    (total, type) => total + composition[type] * SHIP_TYPES[type].strength,
+    0,
+  );
+}
+
+/** Reduces a composition by a loss fraction (0 = untouched, 1 = wiped out),
+ *  applying the same fraction to every ship type and rounding to whole ships. */
+export function applyCompositionLosses(
+  composition: ShipComposition,
+  lossFraction: number,
+): ShipComposition {
+  const survivingShare = Math.max(0, Math.min(1, 1 - lossFraction));
+  return {
+    escort: Math.round(composition.escort * survivingShare),
+    cruiser: Math.round(composition.cruiser * survivingShare),
+  };
+}

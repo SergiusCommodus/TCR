@@ -132,6 +132,39 @@ Fleet is taken from the start, so the next new fleet after Second is Fourth).
 Completion is logged: "Escort construction complete at Sol, assigned to First
 Fleet." or "... forms Second Fleet."
 
+## Combat
+
+Each ship type carries a `strength` in `src/game/ships.ts`: Escort 1, Cruiser
+3. A fleet's strength is the sum of its ships'. Each Directorate or contested
+system carries a starting `garrisonStrength` on its `SystemDef` in
+`src/game/systems.ts` — New Virginia 8, Shiloh 4 — but the strength that
+actually changes as battles are fought lives in `GameSession.garrisons`
+(a map of system id to current strength), the same split as a ship type's
+fixed data versus a fleet's live composition.
+
+When a fleet's travel countdown reaches zero and its destination is
+Directorate or contested, arrival does not complete. The clock pauses (the
+same as any decision event; every speed but Paused is disabled) and a Combat
+Orders panel opens in that system's Military tab, showing the attacking
+fleet's composition and strength side by side with the defending garrison's
+strength. A single Commit to Attack button, no stance options.
+
+On commit (`src/game/combat.ts`), both sides roll their strength with
+independent ±20% variance and whichever total is higher wins. Both sides take
+losses: the winner's loss fraction is proportional to how close the fight
+was (0 at a rout, up to 50% at a near-even fight), and the loser's is the
+complement of that (as low as 50%, up to a full wipe at a rout). Losses are
+split proportionally across a fleet's Escort and Cruiser counts, rounded to
+whole ships. If the attacker wins, the fleet holds position at the system
+(composition reduced) and the garrison weakens; if the defender wins, the
+fleet's survivors — if any — retreat to the nearest other system by travel
+time, or the fleet is destroyed outright if the loss rounds it down to zero
+ships. There is no capture yet: a won engagement weakens the garrison but
+never changes who controls the system — that's a hook for a ground invasion
+mechanic to add later, once ground units exist. A fleet mid-combat can't be
+reassigned (it still holds a destination, so the same guard that blocks
+reassigning an in-transit fleet already covers it).
+
 ## Data model
 
 `src/game/types.ts`:
@@ -144,7 +177,9 @@ Fleet." or "... forms Second Fleet."
   partial `GameState` of deltas, `resultText`, and an optional `delayed` payload
   of `{ afterDays, effects, text }`).
 - `GameSession` wraps `GameState` with the clock (`speed`, `lastTickAt`), the
-  pending event, queued delayed effects and fleets.
+  pending event, a pending combat if a fleet has arrived at a hostile system
+  and not yet been ordered to attack, queued delayed effects, fleets, the
+  build queue, and current garrison strength per system.
 
 `Effects` deliberately excludes `daysElapsed`: time comes from the clock, never
 from a choice's deltas.
@@ -167,6 +202,7 @@ concerns. An event id missing from that map falls back to `'global'`.
 - `src/game/fleets.ts` — transit, naming and composition helpers shared by
   the map and the panel.
 - `src/game/travel.ts` — the per-pair travel time table and lane list.
-- `src/game/ships.ts` — ship type data: cost and build time per type.
+- `src/game/ships.ts` — ship type data: cost, build time and strength per type.
+- `src/game/combat.ts` — the pure combat roll: strength, variance, losses.
 - `src/components/` — `SystemMap`, `SystemPanel` (tabs), `SpeedControls`,
   `DecisionCard` (shared by the Political tab and the national banner).

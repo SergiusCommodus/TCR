@@ -53,3 +53,19 @@ for (const [a, b] of systemPairs()) {
     console.warn(`No travel time entry for ${a} <-> ${b}; using the ${DEFAULT_TRAVEL_DAYS}d default.`);
   }
 }
+
+/** The closest other system by travel time, for a defeated fleet's retreat.
+ *  Falls back to `fromId` itself only if no other system exists. */
+export function nearestOtherSystem(fromId: string): string {
+  let best: string | null = null;
+  let bestDays = Infinity;
+  for (const system of SYSTEMS) {
+    if (system.id === fromId) continue;
+    const days = travelDays(fromId, system.id);
+    if (days < bestDays) {
+      bestDays = days;
+      best = system.id;
+    }
+  }
+  return best ?? fromId;
+}

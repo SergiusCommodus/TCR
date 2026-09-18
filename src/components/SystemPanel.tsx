@@ -1,10 +1,10 @@
 import { findEvent } from '../game/events';
-import { buildDaysOut, daysOut, describeComposition } from '../game/fleets';
+import { buildDaysOut, daysOut, describeComposition, fleetStrength } from '../game/fleets';
 import { SHIP_TYPE_LIST, SHIP_TYPES } from '../game/ships';
 import { CONTROLLER_LABEL, HOME_SYSTEM_ID, SYSTEMS, systemName } from '../game/systems';
 import { travelDays } from '../game/travel';
 import type { SystemDef } from '../game/systems';
-import type { BuildOrder, Fleet, ShipType } from '../game/types';
+import type { BuildOrder, Fleet, PendingCombat, ShipType } from '../game/types';
 import DecisionCard from './DecisionCard';
 
 export const TABS = ['Military', 'Buildings', 'Economy', 'Political'] as const;
@@ -16,6 +16,9 @@ interface Props {
   materiel: number;
   /** The pending event id when it belongs to this system, otherwise null. */
   pendingEventId: string | null;
+  /** Set only when this system is the one the pending combat is at. */
+  pendingCombat: PendingCombat | null;
+  garrisons: Record<string, number>;
   fleets: Fleet[];
   buildQueue: BuildOrder[];
   tab: Tab;
@@ -23,6 +26,7 @@ interface Props {
   onChoose: (choiceIndex: number) => void;
   onAssignFleet: (fleetId: string, destinationId: string) => void;
   onBuildShip: (systemId: string, shipType: ShipType) => void;
+  onCommitAttack: () => void;
 }
 
 function Placeholder({ title, children }: { title: string; children: string }) {
@@ -41,8 +45,47 @@ interface MilitaryProps {
   materiel: number;
   fleets: Fleet[];
   buildQueue: BuildOrder[];
+  pendingCombat: PendingCombat | null;
+  garrisonStrength: number;
   onAssignFleet: (fleetId: string, destinationId: string) => void;
   onBuildShip: (systemId: string, shipType: ShipType) => void;
+  onCommitAttack: () => void;
+}
+
+function CombatOrdersPanel({
+  fleet,
+  attackerStrength,
+  defenderStrength,
+  onCommitAttack,
+}: {
+  fleet: Fleet;
+  attackerStrength: number;
+  defenderStrength: number;
+  onCommitAttack: () => void;
+}) {
+  return (
+    <section className="tab-section combat-orders">
+      <h4>Combat Orders</h4>
+      <p className="quiet">
+        {fleet.name} has arrived and is holding at the system edge, awaiting orders.
+      </p>
+      <div className="combat-sides">
+        <div className="combat-side">
+          <p className="combat-side-label">Attacking</p>
+          <p className="fleet-name">{fleet.name}</p>
+          <p className="quiet">{describeComposition(fleet.composition)}</p>
+          <p className="combat-strength">{attackerStrength} strength</p>
+        </div>
+        <div className="combat-side combat-side-defender">
+          <p className="combat-side-label">Defending garrison</p>
+          <p className="combat-strength">{defenderStrength} strength</p>
+        </div>
+      </div>
+      <button className="commit-attack" onClick={onCommitAttack}>
+        Commit to Attack
+      </button>
+    </section>
+  );
 }
 
 function BuildPanel({
@@ -105,17 +148,30 @@ function MilitaryTab({
   materiel,
   fleets,
   buildQueue,
+  pendingCombat,
+  garrisonStrength,
   onAssignFleet,
   onBuildShip,
+  onCommitAttack,
 }: MilitaryProps) {
   const stationed = fleets.filter((f) => f.location === system.id);
   // Fleets that departed from this system and are currently between here and
   // wherever they were sent — this system's own record of where its ships are.
   const transiting = fleets.filter((f) => f.origin === system.id);
   const destinations = SYSTEMS.filter((s) => s.id !== system.id);
+  const combatFleet = pendingCombat ? fleets.find((f) => f.id === pendingCombat.fleetId) : undefined;
 
   return (
     <>
+      {combatFleet && (
+        <CombatOrdersPanel
+          fleet={combatFleet}
+          attackerStrength={fleetStrength(combatFleet.composition)}
+          defenderStrength={garrisonStrength}
+          onCommitAttack={onCommitAttack}
+        />
+      )}
+
       <Placeholder title="Garrison and orbital defense">
         Ground formations, fortifications, and the local order of battle will live here.
       </Placeholder>
@@ -138,10 +194,15 @@ function MilitaryTab({
 
         {transiting.map((fleet) => {
           const remaining = daysOut(fleet, daysElapsed);
+          const arrived = pendingCombat?.fleetId === fleet.id;
           return (
             <p key={fleet.id} className="quiet">
-              {fleet.name} ({describeComposition(fleet.composition)}) en route to{' '}
-              {systemName(fleet.destination)}, {remaining} day{remaining === 1 ? '' : 's'} remaining.
+              {fleet.name} ({describeComposition(fleet.composition)}){' '}
+              {arrived
+                ? `has reached ${systemName(fleet.destination)} and awaits combat orders.`
+                : `en route to ${systemName(fleet.destination)}, ${remaining} day${
+                    remaining === 1 ? '' : 's'
+                  } remaining.`}
             </p>
           );
         })}
@@ -174,6 +235,8 @@ export default function SystemPanel({
   daysElapsed,
   materiel,
   pendingEventId,
+  pendingCombat,
+  garrisons,
   fleets,
   buildQueue,
   tab,
@@ -181,6 +244,7 @@ export default function SystemPanel({
   onChoose,
   onAssignFleet,
   onBuildShip,
+  onCommitAttack,
 }: Props) {
   const event = pendingEventId ? findEvent(pendingEventId) : undefined;
 
@@ -222,8 +286,11 @@ export default function SystemPanel({
             materiel={materiel}
             fleets={fleets}
             buildQueue={buildQueue}
+            pendingCombat={pendingCombat}
+            garrisonStrength={garrisons[system.id] ?? 0}
             onAssignFleet={onAssignFleet}
             onBuildShip={onBuildShip}
+            onCommitAttack={onCommitAttack}
           />
         )}
 

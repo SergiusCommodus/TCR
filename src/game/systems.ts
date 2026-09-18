@@ -9,6 +9,14 @@ export interface SystemDef {
   /** Map position as a percentage of the map box. */
   x: number;
   y: number;
+  /**
+   * Starting defensive strength for a Directorate or contested system —
+   * undefined for a Republic one, which is never attacked. This is the
+   * baseline a fresh game starts from; the strength that actually changes as
+   * battles are fought lives in GameSession.garrisons, not here, the same
+   * split as a ship type's fixed data versus a fleet's live composition.
+   */
+  garrisonStrength?: number;
 }
 
 export const CONTROLLER_LABEL: Record<Controller, string> = {
@@ -33,6 +41,7 @@ export const SYSTEMS: SystemDef[] = [
     note: 'Fallen. Directorate ground forces hold the capital; the naval garrison was overwhelmed in hours.',
     x: 76,
     y: 30,
+    garrisonStrength: 8,
   },
   {
     id: 'anchorage',
@@ -49,6 +58,7 @@ export const SYSTEMS: SystemDef[] = [
     note: 'Former Confederate mining frontier. Local government has not answered Republic hails in six days.',
     x: 68,
     y: 80,
+    garrisonStrength: 4,
   },
 ];
 

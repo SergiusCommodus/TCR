@@ -550,6 +550,63 @@ body {
   border-top: 1px dashed var(--line);
 }
 
+.combat-orders {
+  border: 1px solid var(--directorate);
+  border-left-width: 3px;
+  background: linear-gradient(180deg, var(--directorate-dim), var(--hull) 65%);
+  border-radius: 3px;
+  padding: 0.75rem 0.85rem;
+}
+
+.combat-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin: 0.6rem 0;
+}
+
+.combat-side {
+  border: 1px solid var(--line-bright);
+  border-radius: 3px;
+  padding: 0.55rem 0.65rem;
+  background: rgba(5, 7, 13, 0.4);
+}
+
+.combat-side-defender {
+  border-color: var(--directorate);
+}
+
+.combat-side-label {
+  margin: 0 0 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.combat-strength {
+  margin: 0.3rem 0 0;
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.commit-attack {
+  font: inherit;
+  font-weight: 600;
+  padding: 0.55rem 1.1rem;
+  background: var(--directorate);
+  color: var(--space-deep);
+  border: 1px solid var(--directorate);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.commit-attack:hover {
+  filter: brightness(1.1);
+}
+
 /* ---------- decisions ---------- */
 
 .decision h3 {

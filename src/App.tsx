@@ -22,7 +22,7 @@ function pendingSystemOf(pendingEventId: string | null): string | null {
 
 export default function App() {
   const [session, dispatch] = useReducer(reducer, undefined, initialSession);
-  const { state, speed, pendingEventId, fleets } = session;
+  const { state, speed, pendingEventId, pendingCombat, fleets } = session;
 
   const pendingSystemId = pendingSystemOf(pendingEventId);
   const globalEvent = pendingEventId && !pendingSystemId ? findEvent(pendingEventId) : undefined;
@@ -36,6 +36,9 @@ export default function App() {
   /** A system decision is only on screen when its system is open on the Political tab. */
   const decisionVisible =
     pendingSystemId !== null && pendingSystemId === selectedId && tab === 'Political';
+  /** Combat Orders lives in the Military tab of the system under attack. */
+  const combatVisible =
+    pendingCombat !== null && pendingCombat.systemId === selectedId && tab === 'Military';
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -59,6 +62,12 @@ export default function App() {
     if (!pendingSystemId) return;
     setSelectedId(pendingSystemId);
     setTab('Political');
+  };
+
+  const openPendingCombat = () => {
+    if (!pendingCombat) return;
+    setSelectedId(pendingCombat.systemId);
+    setTab('Military');
   };
 
   const restart = () => {
@@ -90,7 +99,11 @@ export default function App() {
           >
             <span style={{ width: `${(state.daysElapsed % 1) * 100}%` }} />
           </div>
-          <SpeedControls speed={speed} locked={Boolean(pendingEventId)} onChange={setSpeed} />
+          <SpeedControls
+            speed={speed}
+            locked={Boolean(pendingEventId) || Boolean(pendingCombat)}
+            onChange={setSpeed}
+          />
         </div>
 
         <dl className="briefing">
@@ -129,11 +142,18 @@ export default function App() {
         </button>
       )}
 
+      {pendingCombat && !combatVisible && (
+        <button className="pending-hint" onClick={openPendingCombat}>
+          Combat orders pending at {systemName(pendingCombat.systemId)} — open its Military tab
+        </button>
+      )}
+
       <main className="stage">
         <SystemMap
           daysElapsed={state.daysElapsed}
           selectedId={selectedId}
           pendingSystemId={pendingSystemId}
+          pendingCombatSystemId={pendingCombat?.systemId ?? null}
           fleets={fleets}
           onSelect={setSelectedId}
         />
@@ -142,6 +162,8 @@ export default function App() {
           daysElapsed={state.daysElapsed}
           materiel={state.materiel}
           pendingEventId={pendingSystemId === selected.id ? pendingEventId : null}
+          pendingCombat={pendingCombat?.systemId === selected.id ? pendingCombat : null}
+          garrisons={session.garrisons}
           fleets={fleets}
           buildQueue={session.buildQueue}
           tab={tab}
@@ -151,6 +173,7 @@ export default function App() {
             dispatch({ type: 'assignFleet', fleetId, destinationId })
           }
           onBuildShip={(systemId, shipType) => dispatch({ type: 'buildShip', systemId, shipType })}
+          onCommitAttack={() => dispatch({ type: 'commitAttack' })}
         />
       </main>
 
@@ -165,8 +188,10 @@ export default function App() {
           <button className="secondary" onClick={restart}>
             Restart
           </button>
-          {pendingEventId && (
-            <p className="quiet">Clock paused. Resolve the pending decision to resume.</p>
+          {(pendingEventId || pendingCombat) && (
+            <p className="quiet">
+              Clock paused. Resolve the pending {pendingEventId ? 'decision' : 'combat'} to resume.
+            </p>
           )}
         </div>
       </footer>

@@ -8,12 +8,14 @@ export interface ShipTypeDef {
   materielCost: number;
   /** In game days from when construction begins to when the ship joins a fleet. */
   buildDays: number;
+  /** Combat strength this ship contributes to its fleet's total. */
+  strength: number;
 }
 
 /**
- * The two ship types available for construction. Placeholder costs and build
- * times, kept as simple data so they're easy to retune later: Escort is
- * cheap and fast, Cruiser is costlier and slower.
+ * The two ship types available for construction. Placeholder costs, build
+ * times and strengths, kept as simple data so they're easy to retune later:
+ * Escort is cheap, fast, and weak; Cruiser is costlier, slower, and strong.
  */
 export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
   escort: {
@@ -22,6 +24,7 @@ export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
     pluralName: 'Escorts',
     materielCost: 15,
     buildDays: 4,
+    strength: 1,
   },
   cruiser: {
     id: 'cruiser',
@@ -29,6 +32,7 @@ export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
     pluralName: 'Cruisers',
     materielCost: 40,
     buildDays: 10,
+    strength: 3,
   },
 };
 

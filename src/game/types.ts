@@ -76,6 +76,14 @@ export interface BuildOrder {
   completesOnDay: number;
 }
 
+/** A fleet that has reached a Directorate or contested system and is
+ *  waiting for the player to commit to attack, or not, before the clock can
+ *  resume. */
+export interface PendingCombat {
+  fleetId: string;
+  systemId: string;
+}
+
 /** 0 is paused; 1 through 5 are the in game days per real minute. */
 export type Speed = 0 | 1 | 2 | 3 | 4 | 5;
 
@@ -85,6 +93,7 @@ export interface GameSession {
   /** Wall clock reading of the last settled moment, or null before the first. */
   lastTickAt: number | null;
   pendingEventId: string | null;
+  pendingCombat: PendingCombat | null;
   firedEventIds: string[];
   queued: QueuedEffects[];
   fleets: Fleet[];
@@ -93,4 +102,8 @@ export interface GameSession {
    *  forward past any name already in use (First and Third are taken from the
    *  start), so it never has to be exactly sequential. */
   nextFleetNumber: number;
+  /** Current defensive strength per system id. Starts from each system's
+   *  static garrisonStrength and is reduced by combat from there, the same
+   *  split as a fleet's live composition versus a ship type's fixed data. */
+  garrisons: Record<string, number>;
 }

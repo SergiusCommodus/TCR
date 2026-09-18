@@ -1,8 +1,9 @@
+import { rollCombat } from './combat';
 import { EVENTS, findEvent } from './events';
-import { nextFleetName } from './fleets';
+import { applyCompositionLosses, describeComposition, fleetStrength, nextFleetName } from './fleets';
 import { SHIP_TYPES } from './ships';
-import { HOME_SYSTEM_ID, systemById, systemName } from './systems';
-import { travelDays } from './travel';
+import { HOME_SYSTEM_ID, SYSTEMS, systemById, systemName } from './systems';
+import { nearestOtherSystem, travelDays } from './travel';
 import type {
   BuildOrder,
   Effects,
@@ -10,6 +11,7 @@ import type {
   Fleet,
   GameSession,
   GameState,
+  PendingCombat,
   QueuedEffects,
   ShipType,
   Speed,
@@ -71,6 +73,17 @@ const INITIAL_FLEETS: Fleet[] = [
  *  sequence at Second and skips forward past any name already in use. */
 const INITIAL_NEXT_FLEET_NUMBER = 2;
 
+/** Starting garrison strength per system, read from each Directorate or
+ *  contested system's static baseline; a Republic system (never attacked)
+ *  contributes nothing. */
+function initialGarrisons(): Record<string, number> {
+  const garrisons: Record<string, number> = {};
+  for (const system of SYSTEMS) {
+    if (system.garrisonStrength !== undefined) garrisons[system.id] = system.garrisonStrength;
+  }
+  return garrisons;
+}
+
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 /** Whole day number used in log lines and readouts. */
@@ -111,10 +124,12 @@ export function initialSession(): GameSession {
     lastTickAt: null,
     pendingEventId: opening ? opening.id : null,
     firedEventIds: opening ? [opening.id] : [],
+    pendingCombat: null,
     queued: [],
     fleets: INITIAL_FLEETS,
     buildQueue: [],
     nextFleetNumber: INITIAL_NEXT_FLEET_NUMBER,
+    garrisons: initialGarrisons(),
   };
 }
 
@@ -140,7 +155,9 @@ function pickEventForDay(day: number, firedEventIds: string[]): EventDef | undef
  * in game time runs past a decision the player has not made yet.
  */
 function runClock(session: GameSession, realMs: number): GameSession {
-  if (session.pendingEventId || session.speed === 0 || realMs <= 0) return session;
+  if (session.pendingEventId || session.pendingCombat || session.speed === 0 || realMs <= 0) {
+    return session;
+  }
 
   const target = session.state.daysElapsed + (realMs * session.speed) / MS_PER_GAME_DAY;
   const log = [...session.state.log];
@@ -153,6 +170,7 @@ function runClock(session: GameSession, realMs: number): GameSession {
   let firedEventIds = session.firedEventIds;
   let days = session.state.daysElapsed;
   let pendingEventId: string | null = null;
+  let pendingCombat: PendingCombat | null = null;
   let speed: Speed = session.speed;
 
   /** Applies everything scheduled at or before `atDay`. */
@@ -170,16 +188,30 @@ function runClock(session: GameSession, realMs: number): GameSession {
 
     fleets = fleets.map((fleet) => {
       if (!fleet.destination || fleet.arrivalDay > atDay) return fleet;
+
       const destination = systemById(fleet.destination);
-      // A hook for later: no combat yet, just a distinct line when the fleet
-      // arrives somewhere the Directorate holds.
-      const arrivalLine =
-        destination?.controller === 'directorate'
-          ? `Day ${dayLabel(fleet.arrivalDay)} — ${fleet.name} arrives at ` +
-            `${systemName(fleet.destination)}. Directorate forces detected in system.`
-          : `Day ${dayLabel(fleet.arrivalDay)} — ${fleet.name} arrives at ` +
-            `${systemName(fleet.destination)}.`;
-      log.push(arrivalLine);
+      const hostile =
+        destination?.controller === 'directorate' || destination?.controller === 'contested';
+
+      if (hostile) {
+        // Only the first hostile arrival found this pass opens Combat
+        // Orders; a second one the same day is left exactly as it is —
+        // still "arrived" with its transit fields intact — and gets caught
+        // again on the next runClock call once this fight is resolved.
+        if (!pendingCombat) {
+          pendingCombat = { fleetId: fleet.id, systemId: fleet.destination };
+          log.push(
+            `Day ${dayLabel(fleet.arrivalDay)} — ${fleet.name} arrives at ` +
+              `${systemName(fleet.destination)}. Awaiting combat orders.`,
+          );
+        }
+        return fleet;
+      }
+
+      log.push(
+        `Day ${dayLabel(fleet.arrivalDay)} — ${fleet.name} arrives at ` +
+          `${systemName(fleet.destination)}.`,
+      );
       return {
         ...fleet,
         location: fleet.destination,
@@ -249,6 +281,11 @@ function runClock(session: GameSession, realMs: number): GameSession {
     log.push(`Day ${boundary} — The war effort grinds on (${describeEffects(DAILY_UPKEEP)}).`);
     settleDueWork(boundary);
 
+    if (pendingCombat) {
+      speed = 0;
+      break;
+    }
+
     const event = pickEventForDay(boundary, firedEventIds);
     if (event) {
       pendingEventId = event.id;
@@ -259,9 +296,10 @@ function runClock(session: GameSession, realMs: number): GameSession {
     }
   }
 
-  if (!pendingEventId) {
+  if (!pendingEventId && !pendingCombat) {
     days = target;
     settleDueWork(days);
+    if (pendingCombat) speed = 0;
   }
 
   return {
@@ -274,6 +312,7 @@ function runClock(session: GameSession, realMs: number): GameSession {
     nextFleetNumber,
     firedEventIds,
     pendingEventId,
+    pendingCombat,
   };
 }
 
@@ -281,6 +320,7 @@ export type GameAction =
   | { type: 'choose'; choiceIndex: number }
   | { type: 'assignFleet'; fleetId: string; destinationId: string }
   | { type: 'buildShip'; systemId: string; shipType: ShipType }
+  | { type: 'commitAttack' }
   | { type: 'setSpeed'; speed: Speed; now: number }
   | { type: 'tick'; now: number }
   | { type: 'reset' };
@@ -300,7 +340,7 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
         session.lastTickAt === null ? session : runClock(session, action.now - session.lastTickAt);
       return {
         ...settled,
-        speed: settled.pendingEventId ? 0 : action.speed,
+        speed: settled.pendingEventId || settled.pendingCombat ? 0 : action.speed,
         lastTickAt: action.now,
       };
     }
@@ -392,6 +432,88 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
         ...session,
         state: { ...applyEffects(session.state, { materiel: -def.materielCost }), log },
         buildQueue: [...session.buildQueue, order],
+      };
+    }
+
+    case 'commitAttack': {
+      const pending = session.pendingCombat;
+      if (!pending) return session;
+      const fleet = session.fleets.find((f) => f.id === pending.fleetId);
+      // Defensive: the fleet or system should always exist here, but never
+      // leave the clock stuck paused with no way to clear it if they don't.
+      if (!fleet) return { ...session, pendingCombat: null };
+
+      const days = session.state.daysElapsed;
+      const attackerStrength = fleetStrength(fleet.composition);
+      const defenderStrength = session.garrisons[pending.systemId] ?? 0;
+      const outcome = rollCombat(attackerStrength, defenderStrength);
+
+      const survivors = applyCompositionLosses(fleet.composition, outcome.attackerLossFraction);
+      const survivingStrength = fleetStrength(survivors);
+      const garrisonAfter = Math.max(
+        0,
+        Math.round(defenderStrength * (1 - outcome.defenderLossFraction)),
+      );
+
+      const log = [
+        ...session.state.log,
+        `Day ${dayLabel(days)} — Battle of ${systemName(pending.systemId)}: ${fleet.name} ` +
+          `(${Math.round(attackerStrength)} strength) engages the garrison ` +
+          `(${Math.round(defenderStrength)} strength). ` +
+          `${outcome.attackerWins ? `${fleet.name} prevails.` : 'The garrison holds.'}`,
+      ];
+
+      let fleets: Fleet[];
+      if (survivingStrength <= 0) {
+        fleets = session.fleets.filter((f) => f.id !== fleet.id);
+        log.push(`Day ${dayLabel(days)} — ${fleet.name} is destroyed at ${systemName(pending.systemId)}.`);
+      } else if (outcome.attackerWins) {
+        fleets = session.fleets.map((f) =>
+          f.id === fleet.id
+            ? {
+                ...f,
+                location: pending.systemId,
+                origin: null,
+                destination: null,
+                departureDay: 0,
+                arrivalDay: 0,
+                composition: survivors,
+              }
+            : f,
+        );
+        log.push(
+          `Day ${dayLabel(days)} — ${fleet.name} holds position at ` +
+            `${systemName(pending.systemId)} (${describeComposition(survivors)} remain).`,
+        );
+      } else {
+        const fallback = nearestOtherSystem(pending.systemId);
+        const eta = travelDays(pending.systemId, fallback);
+        fleets = session.fleets.map((f) =>
+          f.id === fleet.id
+            ? {
+                ...f,
+                location: null,
+                origin: pending.systemId,
+                destination: fallback,
+                departureDay: days,
+                arrivalDay: days + eta,
+                composition: survivors,
+              }
+            : f,
+        );
+        log.push(
+          `Day ${dayLabel(days)} — ${fleet.name} withdraws from ${systemName(pending.systemId)} ` +
+            `toward ${systemName(fallback)} (${describeComposition(survivors)} remain); ` +
+            `ETA ${eta} days.`,
+        );
+      }
+
+      return {
+        ...session,
+        state: { ...session.state, log },
+        fleets,
+        garrisons: { ...session.garrisons, [pending.systemId]: garrisonAfter },
+        pendingCombat: null,
       };
     }
 

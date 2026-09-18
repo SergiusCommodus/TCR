@@ -7,6 +7,7 @@ interface Props {
   daysElapsed: number;
   selectedId: string | null;
   pendingSystemId: string | null;
+  pendingCombatSystemId: string | null;
   fleets: Fleet[];
   onSelect: (systemId: string) => void;
 }
@@ -33,6 +34,7 @@ export default function SystemMap({
   daysElapsed,
   selectedId,
   pendingSystemId,
+  pendingCombatSystemId,
   fleets,
   onSelect,
 }: Props) {
@@ -93,6 +95,7 @@ export default function SystemMap({
             <span className="node-name">{system.name}</span>
             <span className="node-meta">
               {pendingSystemId === system.id && <span className="node-tag">decision</span>}
+              {pendingCombatSystemId === system.id && <span className="node-tag">combat</span>}
               {here.length > 0 && (
                 <span className="node-tag node-tag-fleet">
                   {here.length === 1
