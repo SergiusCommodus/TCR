@@ -343,6 +343,13 @@ body {
 .node-tag-fleet {
   color: var(--muted);
   border-color: var(--line-bright);
+  /* Composition text ("First Fleet: 2 Escorts, 1 Cruiser") runs longer than a
+   *  bare fleet name, so this tag alone is allowed to wrap. */
+  white-space: normal;
+  max-width: 9rem;
+  text-align: center;
+  text-transform: none;
+  letter-spacing: 0.02em;
 }
 
 .fleet-marker {
@@ -365,14 +372,23 @@ body {
   bottom: 1.15rem;
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.05rem;
   font-family: var(--mono);
   font-size: 0.6rem;
   letter-spacing: 0.06em;
-  padding: 0.1rem 0.3rem;
+  padding: 0.15rem 0.35rem;
   background: rgba(5, 7, 13, 0.85);
   border: 1px solid var(--republic-dim);
   border-radius: 2px;
   white-space: nowrap;
+}
+
+.fleet-marker-comp {
+  color: var(--muted);
+  font-size: 0.55rem;
 }
 
 /* ---------- system panel ---------- */
@@ -523,6 +539,15 @@ body {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+}
+
+.build-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--line);
 }
 
 /* ---------- decisions ---------- */

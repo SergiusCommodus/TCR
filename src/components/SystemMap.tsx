@@ -1,5 +1,5 @@
 import { SYSTEMS, systemById } from '../game/systems';
-import { daysOut } from '../game/fleets';
+import { daysOut, describeComposition, fleetLabel, sumComposition } from '../game/fleets';
 import { systemPairs } from '../game/travel';
 import type { Fleet } from '../game/types';
 
@@ -66,7 +66,10 @@ export default function SystemMap({
               ▸
             </span>
             <span className="fleet-marker-label">
-              {fleet.name} · {daysOut(fleet, daysElapsed)}d
+              <span className="fleet-marker-name">
+                {fleet.name} · {daysOut(fleet, daysElapsed)}d
+              </span>
+              <span className="fleet-marker-comp">{describeComposition(fleet.composition)}</span>
             </span>
           </div>
         );
@@ -92,7 +95,9 @@ export default function SystemMap({
               {pendingSystemId === system.id && <span className="node-tag">decision</span>}
               {here.length > 0 && (
                 <span className="node-tag node-tag-fleet">
-                  {here.length === 1 ? here[0].name : `${here.length} fleets`}
+                  {here.length === 1
+                    ? fleetLabel(here[0])
+                    : `${here.length} fleets · ${describeComposition(sumComposition(here))}`}
                 </span>
               )}
             </span>

@@ -140,14 +140,17 @@ export default function App() {
         <SystemPanel
           system={selected}
           daysElapsed={state.daysElapsed}
+          materiel={state.materiel}
           pendingEventId={pendingSystemId === selected.id ? pendingEventId : null}
           fleets={fleets}
+          buildQueue={session.buildQueue}
           tab={tab}
           onTabChange={setTab}
           onChoose={(choiceIndex) => dispatch({ type: 'choose', choiceIndex })}
           onAssignFleet={(fleetId, destinationId) =>
             dispatch({ type: 'assignFleet', fleetId, destinationId })
           }
+          onBuildShip={(systemId, shipType) => dispatch({ type: 'buildShip', systemId, shipType })}
         />
       </main>
 

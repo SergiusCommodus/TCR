@@ -1,13 +1,17 @@
 import { EVENTS, findEvent } from './events';
+import { nextFleetName } from './fleets';
+import { SHIP_TYPES } from './ships';
 import { HOME_SYSTEM_ID, systemById, systemName } from './systems';
 import { travelDays } from './travel';
 import type {
+  BuildOrder,
   Effects,
   EventDef,
   Fleet,
   GameSession,
   GameState,
   QueuedEffects,
+  ShipType,
   Speed,
 } from './types';
 
@@ -48,6 +52,7 @@ const INITIAL_FLEETS: Fleet[] = [
     destination: null,
     departureDay: 0,
     arrivalDay: 0,
+    composition: { escort: 2, cruiser: 1 },
   },
   {
     id: 'third-fleet',
@@ -57,8 +62,14 @@ const INITIAL_FLEETS: Fleet[] = [
     destination: null,
     departureDay: 0,
     arrivalDay: 0,
+    composition: { escort: 1, cruiser: 1 },
   },
 ];
+
+/** The next ordinal a newly built ship's fleet tries first. First and Third
+ *  are already taken by the starting fleets, so construction begins its own
+ *  sequence at Second and skips forward past any name already in use. */
+const INITIAL_NEXT_FLEET_NUMBER = 2;
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -102,6 +113,8 @@ export function initialSession(): GameSession {
     firedEventIds: opening ? [opening.id] : [],
     queued: [],
     fleets: INITIAL_FLEETS,
+    buildQueue: [],
+    nextFleetNumber: INITIAL_NEXT_FLEET_NUMBER,
   };
 }
 
@@ -135,6 +148,8 @@ function runClock(session: GameSession, realMs: number): GameSession {
   let resources = session.state;
   let queued: QueuedEffects[] = session.queued;
   let fleets = session.fleets;
+  let buildQueue: BuildOrder[] = session.buildQueue;
+  let nextFleetNumber = session.nextFleetNumber;
   let firedEventIds = session.firedEventIds;
   let days = session.state.daysElapsed;
   let pendingEventId: string | null = null;
@@ -174,6 +189,58 @@ function runClock(session: GameSession, realMs: number): GameSession {
         arrivalDay: 0,
       };
     });
+
+    const dueBuilds = buildQueue.filter((order) => order.completesOnDay <= atDay);
+    if (dueBuilds.length > 0) {
+      buildQueue = buildQueue.filter((order) => order.completesOnDay > atDay);
+      for (const order of dueBuilds) {
+        const def = SHIP_TYPES[order.shipType];
+        // Joins an existing fleet already stationed where it was built, or
+        // forms a new one if none is there. Picks the first match when more
+        // than one fleet happens to be stationed there.
+        const existing = fleets.find((fleet) => fleet.location === order.systemId);
+
+        if (existing) {
+          fleets = fleets.map((fleet) =>
+            fleet.id === existing.id
+              ? {
+                  ...fleet,
+                  composition: {
+                    ...fleet.composition,
+                    [order.shipType]: fleet.composition[order.shipType] + 1,
+                  },
+                }
+              : fleet,
+          );
+          log.push(
+            `Day ${dayLabel(order.completesOnDay)} — ${def.name} construction complete at ` +
+              `${systemName(order.systemId)}, assigned to ${existing.name}.`,
+          );
+        } else {
+          const formed = nextFleetName(fleets, nextFleetNumber);
+          nextFleetNumber = formed.next;
+          const composition = { escort: 0, cruiser: 0 } as Record<ShipType, number>;
+          composition[order.shipType] = 1;
+          fleets = [
+            ...fleets,
+            {
+              id: `fleet-${order.systemId}-${formed.name.toLowerCase().replace(/\s+/g, '-')}`,
+              name: formed.name,
+              location: order.systemId,
+              origin: null,
+              destination: null,
+              departureDay: 0,
+              arrivalDay: 0,
+              composition,
+            },
+          ];
+          log.push(
+            `Day ${dayLabel(order.completesOnDay)} — ${def.name} construction complete at ` +
+              `${systemName(order.systemId)}, forms ${formed.name}.`,
+          );
+        }
+      }
+    }
   };
 
   for (let boundary = Math.floor(days) + 1; boundary <= target; boundary++) {
@@ -203,6 +270,8 @@ function runClock(session: GameSession, realMs: number): GameSession {
     speed,
     queued,
     fleets,
+    buildQueue,
+    nextFleetNumber,
     firedEventIds,
     pendingEventId,
   };
@@ -211,6 +280,7 @@ function runClock(session: GameSession, realMs: number): GameSession {
 export type GameAction =
   | { type: 'choose'; choiceIndex: number }
   | { type: 'assignFleet'; fleetId: string; destinationId: string }
+  | { type: 'buildShip'; systemId: string; shipType: ShipType }
   | { type: 'setSpeed'; speed: Speed; now: number }
   | { type: 'tick'; now: number }
   | { type: 'reset' };
@@ -294,6 +364,34 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
               }
             : f,
         ),
+      };
+    }
+
+    case 'buildShip': {
+      // Construction is Sol only for now; enforced here too, not just by
+      // which system shows the Build panel.
+      if (action.systemId !== HOME_SYSTEM_ID) return session;
+      const def = SHIP_TYPES[action.shipType];
+      if (session.state.materiel < def.materielCost) return session;
+
+      const days = session.state.daysElapsed;
+      const order: BuildOrder = {
+        id: `build-${action.shipType}-${Math.round(days * 1000)}-${session.buildQueue.length}`,
+        systemId: action.systemId,
+        shipType: action.shipType,
+        completesOnDay: days + def.buildDays,
+      };
+      const log = [
+        ...session.state.log,
+        `Day ${dayLabel(days)} — ${def.name} construction begun at ` +
+          `${systemName(action.systemId)} (materiel -${def.materielCost}); complete in ` +
+          `${def.buildDays} days.`,
+      ];
+
+      return {
+        ...session,
+        state: { ...applyEffects(session.state, { materiel: -def.materielCost }), log },
+        buildQueue: [...session.buildQueue, order],
       };
     }
 

@@ -106,6 +106,32 @@ log line is distinct — "First Fleet arrives at New Virginia. Directorate
 forces detected in system." — rather than a plain arrival line. This is a log
 only distinction: no combat, no new game state, just a hook for later.
 
+A fleet is a composition, not a single abstract unit: `{ escort, cruiser }`
+counts. Every display shows it — "First Fleet: 2 Escorts, 1 Cruiser" on the
+map, in the Military tab, and on the in transit marker — the shape combat
+resolution will need next, already in place even though nothing consumes it
+yet.
+
+## Ship construction
+
+The Military tab shows a Shipyard section only when Sol is selected —
+construction is Sol only for now, enforced both in the UI and, defensively, in
+the reducer. Two ship types, defined as plain data in `src/game/ships.ts`:
+Escort (15 materiel, 4 days) and Cruiser (40 materiel, 10 days). Clicking a
+build button deducts the cost immediately (disabled if you can't afford it)
+and adds an order to a build queue, shown under the Shipyard while anything is
+building. The order stores an absolute `completesOnDay`, the same pattern as
+fleet transit, so it counts down on the shared clock rather than a timer of
+its own, and survives a pause exactly like everything else.
+
+When a ship completes, it joins a fleet already stationed at that system if
+one exists — First Fleet at Sol, at the start of a game — or forms a new one
+if the system currently has no fleet there. New fleets are named Second Fleet
+first, then keep incrementing, skipping any ordinal already in use (Third
+Fleet is taken from the start, so the next new fleet after Second is Fourth).
+Completion is logged: "Escort construction complete at Sol, assigned to First
+Fleet." or "... forms Second Fleet."
+
 ## Data model
 
 `src/game/types.ts`:
@@ -138,7 +164,9 @@ concerns. An event id missing from that map falls back to `'global'`.
 - `src/game/events.ts` — event content.
 - `src/game/state.ts` — the clock, the reducer, upkeep, delayed effects, fleets.
 - `src/game/systems.ts` — systems, controllers, map positions, event scope.
-- `src/game/fleets.ts` — transit helpers shared by the map and the panel.
+- `src/game/fleets.ts` — transit, naming and composition helpers shared by
+  the map and the panel.
 - `src/game/travel.ts` — the per-pair travel time table and lane list.
+- `src/game/ships.ts` — ship type data: cost and build time per type.
 - `src/components/` — `SystemMap`, `SystemPanel` (tabs), `SpeedControls`,
   `DecisionCard` (shared by the Political tab and the national banner).

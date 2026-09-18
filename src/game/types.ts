@@ -43,7 +43,15 @@ export interface QueuedEffects {
   text: string;
 }
 
-/** An abstract fleet. Stationed at a system, or in transit between two. */
+/** The two ship types available for construction. */
+export type ShipType = 'escort' | 'cruiser';
+
+/** How many of each ship type a fleet carries. The shape combat resolution
+ *  will read from later, so every fleet always has both keys, zero or not. */
+export type ShipComposition = Record<ShipType, number>;
+
+/** A fleet: a composition of ships, stationed at a system or in transit
+ *  between two. */
 export interface Fleet {
   id: string;
   name: string;
@@ -55,6 +63,17 @@ export interface Fleet {
   /** Absolute day numbers, so transit is drift free like everything else. */
   departureDay: number;
   arrivalDay: number;
+  composition: ShipComposition;
+}
+
+/** A ship under construction at a system, counting down on the same day
+ *  based clock as everything else. */
+export interface BuildOrder {
+  id: string;
+  systemId: string;
+  shipType: ShipType;
+  /** Absolute day the ship joins a fleet, so it is drift free like transit. */
+  completesOnDay: number;
 }
 
 /** 0 is paused; 1 through 5 are the in game days per real minute. */
@@ -69,4 +88,9 @@ export interface GameSession {
   firedEventIds: string[];
   queued: QueuedEffects[];
   fleets: Fleet[];
+  buildQueue: BuildOrder[];
+  /** The ordinal to try first when a completed ship needs a new fleet; skips
+   *  forward past any name already in use (First and Third are taken from the
+   *  start), so it never has to be exactly sequential. */
+  nextFleetNumber: number;
 }
