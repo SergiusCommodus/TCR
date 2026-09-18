@@ -216,13 +216,44 @@ A system's live controller, not its static baseline, is what decides
 whether an arriving fleet triggers combat at all — a system Occupy and
 Govern has already flipped no longer pauses the clock for a later arrival.
 
+## Manpower and tax policy
+
+A fifth resource, Manpower, sits in the Briefing panel alongside the
+original four. It starts at 30 and drifts up by a small flat amount each
+day (0.5, folded into the same `DAILY_UPKEEP` mechanism materiel and
+population already drift on), narrated as population converting into a
+form the war effort can spend. Transport is the one ship type that spends
+it: building one now costs `manpowerCost` (8) alongside `materielCost`, so
+the Shipyard's affordability check and button label cover both; Escort and
+Cruiser stay materiel only (`manpowerCost: 0`).
+
+The Political tab carries a standing Tax Policy control — Low, Standard,
+Wartime — visible whichever system you're looking at, since taxation is a
+national setting, not a per-system one, the same reasoning that puts
+national events in the top banner rather than a system's own tab. Standard
+reproduces the original daily drift exactly. Low subtracts from materiel's
+daily drift and adds to approval's; Wartime does the reverse, by the same
+magnitude in the other direction (`TAX_POLICY_MODIFIERS` in
+`src/game/state.ts`, layered onto `DAILY_UPKEEP` rather than replacing it).
+Population, leadership and manpower drift are untouched by tax policy.
+Changing it applies to the very next day processed and holds until changed
+again; picking the policy already active is a no-op, so the log doesn't
+fill with redundant lines.
+
+The "Emergency Conscription Authority" event (day 9, unchanged framing and
+choices) now pulls its payoff from manpower instead of a flat approval
+hit: granting conscription still pulls 40 from population, exactly as
+before, but grants 15 manpower rather than costing 8 approval. The delayed
+materiel payoff six days later is untouched. The other two choices on that
+event are untouched.
+
 ## Data model
 
 `src/game/types.ts`:
 
 - `GameState`: `daysElapsed`, `materiel`, `population`, `approval`,
-  `leadershipPoints`, `log: string[]`. `daysElapsed` is fractional; the whole
-  number is what the readout and log lines show.
+  `leadershipPoints`, `manpower`, `log: string[]`. `daysElapsed` is fractional;
+  the whole number is what the readout and log lines show.
 - `EventDef`: `id`, `dayTrigger` (a day number or `'random'`, with
   `earliestDay`), `title`, `text`, `choices` (each with `label`, `effects` as a
   partial `GameState` of deltas, `resultText`, and an optional `delayed` payload
@@ -231,17 +262,18 @@ Govern has already flipped no longer pauses the clock for a later arrival.
   pending event, a pending combat if a fleet has arrived at a hostile system
   and not yet been ordered to attack, a pending occupation if an invasion has
   just succeeded, queued delayed effects, fleets, the build queue, current
-  garrison and ground defense strength per system, and each system's live
-  controller override.
+  garrison and ground defense strength per system, each system's live
+  controller override, and the standing tax policy.
 
 `Effects` deliberately excludes `daysElapsed`: time comes from the clock, never
 from a choice's deltas.
 
-Daily drift (`DAILY_UPKEEP` in `src/game/state.ts`) is materiel -1.2,
-population +1, approval -0.4, leadership +0.2. The scripted events now span 22
-days where they once spanned 5 turns, so the old per turn drift was scaled to
-roughly a fifth to keep the same economic pressure; a run to day 30 lands within
-a few points of where the turn based version landed at its last scripted event.
+Daily drift (`DAILY_UPKEEP` in `src/game/state.ts`, at Standard tax policy) is
+materiel -1.2, population +1, approval -0.4, leadership +0.2, manpower +0.5.
+The scripted events now span 22 days where they once spanned 5 turns, so the
+old per turn drift was scaled to roughly a fifth to keep the same economic
+pressure; a run to day 30 lands within a few points of where the turn based
+version landed at its last scripted event.
 
 `src/game/systems.ts` holds the four systems plus an `EVENT_SCOPE` map from
 event id to system id or `'global'`, keeping event content free of layout
@@ -260,5 +292,6 @@ concerns. An event id missing from that map falls back to `'global'`.
   Shared unchanged by naval combat and ground invasion.
 - `src/game/occupation.ts` — the four occupation choices and the synthetic
   `EventDef` that lets DecisionCard render them.
-- `src/components/` — `SystemMap`, `SystemPanel` (tabs), `SpeedControls`,
-  `DecisionCard` (shared by the Political tab and the national banner).
+- `src/components/` — `SystemMap`, `SystemPanel` (tabs, including the
+  Shipyard, Invade and Tax Policy controls), `SpeedControls`, `DecisionCard`
+  (shared by the Political tab and the national banner).

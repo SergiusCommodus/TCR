@@ -7,6 +7,10 @@ export interface GameState {
   population: number;
   approval: number;
   leadershipPoints: number;
+  /** Military manpower: population converted into a form the war effort can
+   *  actually spend, on Transports for now. Drifts up slowly from population
+   *  on its own; conscription is the other way to get a real amount of it. */
+  manpower: number;
   log: string[];
 }
 
@@ -100,6 +104,10 @@ export interface PendingOccupation {
 /** 0 is paused; 1 through 5 are the in game days per real minute. */
 export type Speed = 0 | 1 | 2 | 3 | 4 | 5;
 
+/** Low trades materiel income for approval over time; Wartime trades the
+ *  other way; Standard is the untouched baseline drift. */
+export type TaxPolicy = 'low' | 'standard' | 'wartime';
+
 export interface GameSession {
   state: GameState;
   speed: Speed;
@@ -127,4 +135,8 @@ export interface GameSession {
    *  baseline. Sparse: a system absent here is still at its static baseline.
    *  Currently only ever set by a successful Occupy and Govern choice. */
   controllerOverrides: Record<string, Controller>;
+  /** The standing tax policy: takes effect immediately and holds until
+   *  changed again, same as any other policy setting rather than a one time
+   *  event choice. */
+  taxPolicy: TaxPolicy;
 }

@@ -22,7 +22,8 @@ function pendingSystemOf(pendingEventId: string | null): string | null {
 
 export default function App() {
   const [session, dispatch] = useReducer(reducer, undefined, initialSession);
-  const { state, speed, pendingEventId, pendingCombat, pendingOccupation, fleets } = session;
+  const { state, speed, pendingEventId, pendingCombat, pendingOccupation, taxPolicy, fleets } =
+    session;
 
   const pendingSystemId = pendingSystemOf(pendingEventId);
   const globalEvent = pendingEventId && !pendingSystemId ? findEvent(pendingEventId) : undefined;
@@ -133,6 +134,10 @@ export default function App() {
             <dt>Leadership</dt>
             <dd>{state.leadershipPoints}</dd>
           </div>
+          <div>
+            <dt>Manpower</dt>
+            <dd>{state.manpower}</dd>
+          </div>
         </dl>
       </header>
 
@@ -180,6 +185,7 @@ export default function App() {
           system={selected}
           daysElapsed={state.daysElapsed}
           materiel={state.materiel}
+          manpower={state.manpower}
           pendingEventId={pendingSystemId === selected.id ? pendingEventId : null}
           pendingCombat={pendingCombat?.systemId === selected.id ? pendingCombat : null}
           pendingOccupation={pendingOccupation?.systemId === selected.id ? pendingOccupation : null}
@@ -188,6 +194,7 @@ export default function App() {
           controllerOverrides={session.controllerOverrides}
           fleets={fleets}
           buildQueue={session.buildQueue}
+          taxPolicy={taxPolicy}
           tab={tab}
           onTabChange={setTab}
           onChoose={(choiceIndex) => dispatch({ type: 'choose', choiceIndex })}
@@ -198,6 +205,7 @@ export default function App() {
           onCommitAttack={() => dispatch({ type: 'commitAttack' })}
           onCommitInvasion={(fleetId) => dispatch({ type: 'commitInvasion', fleetId })}
           onCommitOccupation={(choiceIndex) => dispatch({ type: 'commitOccupation', choiceIndex })}
+          onSetTaxPolicy={(policy) => dispatch({ type: 'setTaxPolicy', policy })}
         />
       </main>
 

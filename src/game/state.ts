@@ -22,6 +22,7 @@ import type {
   QueuedEffects,
   ShipType,
   Speed,
+  TaxPolicy,
 } from './types';
 
 /** At 1x, one real minute is one in game day. Speed multiplies that directly,
@@ -39,18 +40,59 @@ export const INITIAL_STATE: GameState = {
   population: 9400,
   approval: 58,
   leadershipPoints: 4,
+  manpower: 30,
   log: ['Day 0 — Emergency session convened. New Virginia is in Directorate hands.'],
 };
 
-/** Automatic drift applied for each whole in game day that passes. The scripted
- *  events now span 22 days where they once spanned 5 turns, so the old per turn
- *  drift is scaled to roughly a fifth to keep the same economic pressure. */
+/** Automatic drift applied for each whole in game day that passes, at
+ *  Standard tax policy. The scripted events now span 22 days where they once
+ *  spanned 5 turns, so the old per turn drift is scaled to roughly a fifth to
+ *  keep the same economic pressure. */
 const DAILY_UPKEEP: Effects = {
   materiel: -1.2,
   population: 1,
   approval: -0.4,
   leadershipPoints: 0.2,
+  manpower: 0.5,
 };
+
+/**
+ * Materiel and approval deltas layered onto DAILY_UPKEEP by tax policy — a
+ * modifier, not a replacement, so Standard reproduces DAILY_UPKEEP exactly.
+ * Low trades materiel income for approval over time; Wartime trades the
+ * other way. Population, leadership and manpower drift are untouched by
+ * tax policy.
+ */
+const TAX_POLICY_MODIFIERS: Record<TaxPolicy, { materiel: number; approval: number }> = {
+  low: { materiel: -0.6, approval: 0.6 },
+  standard: { materiel: 0, approval: 0 },
+  wartime: { materiel: 0.8, approval: -0.8 },
+};
+
+/** Short, narrated line logged when the player changes tax policy. */
+const TAX_POLICY_CHANGE_TEXT: Record<TaxPolicy, string> = {
+  low: 'Rates ease across the core worlds. Treasury receipts fall almost immediately, and so does the grumbling.',
+  standard: 'Wartime rates return to their ordinary schedule.',
+  wartime: 'Emergency levies are imposed on every world still answering to Sol.',
+};
+
+export const TAX_POLICY_LABEL: Record<TaxPolicy, string> = {
+  low: 'Low',
+  standard: 'Standard',
+  wartime: 'Wartime',
+};
+
+export const TAX_POLICIES: TaxPolicy[] = ['low', 'standard', 'wartime'];
+
+/** The day's automatic drift under the given tax policy. */
+function dailyUpkeepFor(taxPolicy: TaxPolicy): Effects {
+  const mod = TAX_POLICY_MODIFIERS[taxPolicy];
+  return {
+    ...DAILY_UPKEEP,
+    materiel: (DAILY_UPKEEP.materiel ?? 0) + mod.materiel,
+    approval: (DAILY_UPKEEP.approval ?? 0) + mod.approval,
+  };
+}
 
 const INITIAL_FLEETS: Fleet[] = [
   {
@@ -115,6 +157,7 @@ export function applyEffects(state: GameState, effects: Effects): GameState {
     population: round1(state.population + (effects.population ?? 0)),
     approval: round1(state.approval + (effects.approval ?? 0)),
     leadershipPoints: round1(state.leadershipPoints + (effects.leadershipPoints ?? 0)),
+    manpower: round1(state.manpower + (effects.manpower ?? 0)),
   };
 }
 
@@ -123,6 +166,7 @@ const LABELS: Record<keyof Effects, string> = {
   population: 'population',
   approval: 'approval',
   leadershipPoints: 'leadership',
+  manpower: 'manpower',
 };
 
 export function describeEffects(effects: Effects): string {
@@ -152,6 +196,7 @@ export function initialSession(): GameSession {
     garrisons: initialGarrisons(),
     groundDefenses: initialGroundDefenses(),
     controllerOverrides: {},
+    taxPolicy: 'standard',
   };
 }
 
@@ -307,10 +352,12 @@ function runClock(session: GameSession, realMs: number): GameSession {
     }
   };
 
+  const upkeep = dailyUpkeepFor(session.taxPolicy);
+
   for (let boundary = Math.floor(days) + 1; boundary <= target; boundary++) {
     days = boundary;
-    resources = applyEffects(resources, DAILY_UPKEEP);
-    log.push(`Day ${boundary} — The war effort grinds on (${describeEffects(DAILY_UPKEEP)}).`);
+    resources = applyEffects(resources, upkeep);
+    log.push(`Day ${boundary} — The war effort grinds on (${describeEffects(upkeep)}).`);
     settleDueWork(boundary);
 
     if (pendingCombat) {
@@ -355,6 +402,7 @@ export type GameAction =
   | { type: 'commitAttack' }
   | { type: 'commitInvasion'; fleetId: string }
   | { type: 'commitOccupation'; choiceIndex: number }
+  | { type: 'setTaxPolicy'; policy: TaxPolicy }
   | { type: 'setSpeed'; speed: Speed; now: number }
   | { type: 'tick'; now: number }
   | { type: 'reset' };
@@ -449,7 +497,12 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
       // which system shows the Build panel.
       if (action.systemId !== HOME_SYSTEM_ID) return session;
       const def = SHIP_TYPES[action.shipType];
-      if (session.state.materiel < def.materielCost) return session;
+      if (
+        session.state.materiel < def.materielCost ||
+        session.state.manpower < def.manpowerCost
+      ) {
+        return session;
+      }
 
       const days = session.state.daysElapsed;
       const order: BuildOrder = {
@@ -458,16 +511,17 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
         shipType: action.shipType,
         completesOnDay: days + def.buildDays,
       };
+      const cost: Effects = { materiel: -def.materielCost, manpower: -def.manpowerCost };
       const log = [
         ...session.state.log,
         `Day ${dayLabel(days)} — ${def.name} construction begun at ` +
-          `${systemName(action.systemId)} (materiel -${def.materielCost}); complete in ` +
+          `${systemName(action.systemId)} (${describeEffects(cost)}); complete in ` +
           `${def.buildDays} days.`,
       ];
 
       return {
         ...session,
-        state: { ...applyEffects(session.state, { materiel: -def.materielCost }), log },
+        state: { ...applyEffects(session.state, cost), log },
         buildQueue: [...session.buildQueue, order],
       };
     }
@@ -647,6 +701,19 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
         controllerOverrides,
         pendingOccupation: null,
       };
+    }
+
+    case 'setTaxPolicy': {
+      if (action.policy === session.taxPolicy) return session;
+
+      const days = session.state.daysElapsed;
+      const log = [
+        ...session.state.log,
+        `Day ${dayLabel(days)} — Tax policy set to ${TAX_POLICY_LABEL[action.policy]}: ` +
+          `${TAX_POLICY_CHANGE_TEXT[action.policy]}`,
+      ];
+
+      return { ...session, state: { ...session.state, log }, taxPolicy: action.policy };
     }
 
     case 'reset':

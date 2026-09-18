@@ -74,10 +74,10 @@ export const EVENTS: EventDef[] = [
     choices: [
       {
         label: 'Grant it, scrape the barrel if needed',
-        effects: { population: -40, approval: -8 },
+        effects: { population: -40, manpower: 15 },
         resultText:
           'Conscription notices go out across the core worlds. Industry loses hands now; the ' +
-          'formations they fill will pay for themselves later.',
+          'manpower those formations provide will pay for itself later.',
         delayed: {
           afterDays: 6,
           effects: { materiel: 18 },

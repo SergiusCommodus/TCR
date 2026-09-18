@@ -2,6 +2,7 @@ import { findEvent } from '../game/events';
 import { buildDaysOut, daysOut, describeComposition, fleetStrength } from '../game/fleets';
 import { occupationEventFor } from '../game/occupation';
 import { SHIP_TYPE_LIST, SHIP_TYPES } from '../game/ships';
+import { TAX_POLICIES, TAX_POLICY_LABEL } from '../game/state';
 import {
   CONTROLLER_LABEL,
   HOME_SYSTEM_ID,
@@ -11,7 +12,14 @@ import {
 } from '../game/systems';
 import { travelDays } from '../game/travel';
 import type { Controller, SystemDef } from '../game/systems';
-import type { BuildOrder, Fleet, PendingCombat, PendingOccupation, ShipType } from '../game/types';
+import type {
+  BuildOrder,
+  Fleet,
+  PendingCombat,
+  PendingOccupation,
+  ShipType,
+  TaxPolicy,
+} from '../game/types';
 import DecisionCard from './DecisionCard';
 
 export const TABS = ['Military', 'Buildings', 'Economy', 'Political'] as const;
@@ -21,6 +29,7 @@ interface Props {
   system: SystemDef;
   daysElapsed: number;
   materiel: number;
+  manpower: number;
   /** The pending event id when it belongs to this system, otherwise null. */
   pendingEventId: string | null;
   /** Set only when this system is the one the pending combat is at. */
@@ -32,6 +41,7 @@ interface Props {
   controllerOverrides: Record<string, Controller>;
   fleets: Fleet[];
   buildQueue: BuildOrder[];
+  taxPolicy: TaxPolicy;
   tab: Tab;
   onTabChange: (tab: Tab) => void;
   onChoose: (choiceIndex: number) => void;
@@ -40,6 +50,7 @@ interface Props {
   onCommitAttack: () => void;
   onCommitInvasion: (fleetId: string) => void;
   onCommitOccupation: (choiceIndex: number) => void;
+  onSetTaxPolicy: (policy: TaxPolicy) => void;
 }
 
 function Placeholder({ title, children }: { title: string; children: string }) {
@@ -56,6 +67,7 @@ interface MilitaryProps {
   system: SystemDef;
   daysElapsed: number;
   materiel: number;
+  manpower: number;
   fleets: Fleet[];
   buildQueue: BuildOrder[];
   pendingCombat: PendingCombat | null;
@@ -108,12 +120,14 @@ function BuildPanel({
   system,
   daysElapsed,
   materiel,
+  manpower,
   buildQueue,
   onBuildShip,
 }: {
   system: SystemDef;
   daysElapsed: number;
   materiel: number;
+  manpower: number;
   buildQueue: BuildOrder[];
   onBuildShip: (systemId: string, shipType: ShipType) => void;
 }) {
@@ -125,16 +139,20 @@ function BuildPanel({
       <p className="quiet">Construction is available at Sol for now.</p>
       <div className="fleet-buttons">
         {SHIP_TYPE_LIST.map((def) => {
-          const affordable = materiel >= def.materielCost;
+          const affordable = materiel >= def.materielCost && manpower >= def.manpowerCost;
+          const cost =
+            def.manpowerCost > 0
+              ? `${def.materielCost} materiel, ${def.manpowerCost} manpower, ${def.buildDays}d`
+              : `${def.materielCost} materiel, ${def.buildDays}d`;
           return (
             <button
               key={def.id}
               className="ghost"
               disabled={!affordable}
-              title={affordable ? undefined : 'Not enough materiel'}
+              title={affordable ? undefined : 'Not enough materiel or manpower'}
               onClick={() => onBuildShip(system.id, def.id)}
             >
-              Build {def.name} · {def.materielCost} materiel, {def.buildDays}d
+              Build {def.name} · {cost}
             </button>
           );
         })}
@@ -158,10 +176,41 @@ function BuildPanel({
   );
 }
 
+function TaxPolicyControl({
+  taxPolicy,
+  onSetTaxPolicy,
+}: {
+  taxPolicy: TaxPolicy;
+  onSetTaxPolicy: (policy: TaxPolicy) => void;
+}) {
+  return (
+    <section className="tab-section tax-policy">
+      <h4>Tax Policy</h4>
+      <p className="quiet">
+        Low trades materiel income for approval over time; Wartime trades the other way.
+        Standard is the untouched baseline. Takes effect immediately and holds until changed.
+      </p>
+      <div className="speed" role="group" aria-label="Tax policy">
+        {TAX_POLICIES.map((policy) => (
+          <button
+            key={policy}
+            className={policy === taxPolicy ? 'speed-button is-active' : 'speed-button'}
+            aria-pressed={policy === taxPolicy}
+            onClick={() => onSetTaxPolicy(policy)}
+          >
+            {TAX_POLICY_LABEL[policy]}
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function MilitaryTab({
   system,
   daysElapsed,
   materiel,
+  manpower,
   fleets,
   buildQueue,
   pendingCombat,
@@ -200,6 +249,7 @@ function MilitaryTab({
           system={system}
           daysElapsed={daysElapsed}
           materiel={materiel}
+          manpower={manpower}
           buildQueue={buildQueue}
           onBuildShip={onBuildShip}
         />
@@ -276,6 +326,7 @@ export default function SystemPanel({
   system,
   daysElapsed,
   materiel,
+  manpower,
   pendingEventId,
   pendingCombat,
   pendingOccupation,
@@ -284,6 +335,7 @@ export default function SystemPanel({
   controllerOverrides,
   fleets,
   buildQueue,
+  taxPolicy,
   tab,
   onTabChange,
   onChoose,
@@ -292,6 +344,7 @@ export default function SystemPanel({
   onCommitAttack,
   onCommitInvasion,
   onCommitOccupation,
+  onSetTaxPolicy,
 }: Props) {
   const event = pendingEventId ? findEvent(pendingEventId) : undefined;
   const controller = currentController(system, controllerOverrides);
@@ -336,6 +389,7 @@ export default function SystemPanel({
             system={system}
             daysElapsed={daysElapsed}
             materiel={materiel}
+            manpower={manpower}
             fleets={fleets}
             buildQueue={buildQueue}
             pendingCombat={pendingCombat}
@@ -370,6 +424,7 @@ export default function SystemPanel({
             ) : (
               <p className="quiet">No decision pending in this system.</p>
             )}
+            <TaxPolicyControl taxPolicy={taxPolicy} onSetTaxPolicy={onSetTaxPolicy} />
           </>
         )}
       </div>
