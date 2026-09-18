@@ -49,7 +49,7 @@ body {
   flex-wrap: wrap;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 1rem 1.5rem;
+  gap: 0.9rem 1.5rem;
   padding: 0.85rem 1.1rem;
   background: var(--hull);
   border: 1px solid var(--line);
@@ -69,6 +69,80 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.18em;
   color: var(--muted);
+}
+
+.clock {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 15rem;
+}
+
+.clock-readout {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.clock-label {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.clock-day {
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.day-progress {
+  height: 3px;
+  background: var(--space);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.day-progress span {
+  display: block;
+  height: 100%;
+  background: var(--republic);
+}
+
+.speed {
+  display: flex;
+  gap: 0.2rem;
+}
+
+.speed-button {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+  padding: 0.25rem 0.45rem;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.speed-button:hover:not(:disabled) {
+  border-color: var(--line-bright);
+  color: var(--ink);
+}
+
+.speed-button.is-active {
+  background: var(--republic-dim);
+  border-color: var(--republic);
+  color: var(--ink);
+}
+
+.speed-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .briefing {
@@ -276,7 +350,7 @@ body {
   transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
-  gap: 0.3rem;
+  justify-content: center;
   pointer-events: none;
   color: var(--republic);
 }
@@ -286,6 +360,11 @@ body {
 }
 
 .fleet-marker-label {
+  /* Floats above the lane so it clears a node it is departing or arriving at. */
+  position: absolute;
+  bottom: 1.15rem;
+  left: 50%;
+  transform: translateX(-50%);
   font-family: var(--mono);
   font-size: 0.6rem;
   letter-spacing: 0.06em;

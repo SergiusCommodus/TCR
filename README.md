@@ -1,8 +1,8 @@
 # Continental Republic — War Command (prototype)
 
-A minimal, single screen prototype of a turn based strategy core loop. React +
-TypeScript + Vite, no backend, no persistence: all state lives in a `useReducer`
-store and resets on reload.
+A minimal prototype of a real time strategy core loop with a pausable clock.
+React + TypeScript + Vite, no backend, no persistence: all state lives in a
+`useReducer` store and resets on reload.
 
 ## Setting
 
@@ -20,84 +20,104 @@ npm run build    # typecheck + production build
 npm run preview  # serve the production build
 ```
 
+## The clock
+
+At 1x, **one real minute is one in game day**. Speed multiplies that directly,
+so 5x is five in game days per real minute. Speeds are paused, 1x, 2x, 3x, 4x
+and 5x, selectable at any time from the status bar.
+
+The loop never counts its own ticks. A 100ms interval reports the wall clock,
+the reducer takes the real milliseconds since the last settled moment, and
+`daysElapsed` grows by `realMs * speed / MS_PER_GAME_DAY`. Interval jitter,
+a throttled background tab and long frames therefore cannot accumulate error.
+A speed change settles the elapsed time at the old speed before switching, so
+the interval it lands in is neither lost nor counted twice.
+
+Whole days are then walked one at a time so daily upkeep, delayed effects,
+fleet arrivals and event thresholds land in order even when a single long tick
+spans several days. An event stops that walk: the clock clamps to exactly that
+day and the speed drops to paused, so no in game time runs past a decision the
+player has not made. Speeds other than paused are disabled until it is resolved.
+
 ## The screen
 
 A system map of local space with four nodes, colored by controller (Republic
 blue, Directorate red, contested amber). Clicking a node opens its side panel.
 
-- **Status bar** (top) shows turn, materiel, population, approval and leadership
-  points as plain numbers.
+- **Status bar** shows the day, a progress bar through the current day, the
+  speed controls, and materiel, population, approval and leadership points.
 - **System panel** has four tabs. Military, Buildings and Economy are
   placeholders. **Political** is wired to the live event system: when the pending
   event belongs to that system, its title, body and choices render there.
 - **National events** (congressional sessions, nationwide decisions) render in a
   banner above the map instead, and stay visible whichever system is selected.
-- **History log and Advance Turn** sit along the bottom, unchanged in behavior.
+- **History log** runs along the bottom and records every day's drift, every
+  choice, and every fleet movement.
 
 A node with a pending decision gets a marker, and a hint bar appears whenever
 that decision is off screen (wrong system selected, or the right system open on
-another tab) so a disabled Advance Turn always has a visible cause.
+another tab) so a paused clock always has a visible cause.
 
-## The loop
+## Events
 
-1. Resolve the pending decision, in the system's Political tab or the national
-   banner. Each choice button lists the deltas it applies; picking one applies
-   the effects and writes its result text to the history log.
-2. **Advance Turn** increments the turn, applies automatic per turn drift
-   (`UPKEEP` in `src/game/state.ts`), releases any delayed effects that came due,
-   moves fleets one turn closer, appends lines to the scrollable history log, and
-   checks for the next event. It is disabled while a decision is pending.
+| Day | Event | Scope |
+| --- | --- | --- |
+| 0 | The Fall of New Virginia | New Virginia |
+| 4 | Refugee Transports at Earth Orbit | Sol |
+| 9 | Emergency Conscription Authority | national |
+| 15 | Directorate Industrial Estimates | Shiloh |
+| 22 | A Senator from the Frontier | national |
+| 28+ | Unconfirmed Fleet Movement | Shiloh |
+
+The last one is random: from day 28 it is checked once per day at
+`RANDOM_EVENT_CHANCE` (0.5), so in practice it lands within a day or two of
+becoming eligible. Lower that constant for a longer tail.
+
+Two choices pay off later rather than immediately: emergency conscription
+returns materiel 6 days on, and deep reconnaissance returns leadership points
+7 days on. Both are queued against an absolute day and applied when the clock
+reaches it.
 
 ## Fleets
 
 A stub, with no combat. Two fleets start at Sol and Anchorage. A stationed
-fleet's Military tab offers a button per other system; ordering one sets a
-`TRAVEL_TURNS` countdown (2) that ticks down on each Advance Turn and arrives at
-zero. Orders, transit and arrival are logged like everything else, and a fleet
-in transit shows as a marker interpolated along its lane on the map.
+fleet's Military tab offers a button per other system; ordering one schedules an
+arrival `TRAVEL_DAYS` (6) in the future. Transit is stored as absolute
+`departureDay` and `arrivalDay` rather than a countdown, so it is drift free
+like the rest of the clock. A fleet in transit slides along its lane on the map.
 
 ## Data model
 
 `src/game/types.ts`:
 
-- `GameState`: `turn`, `materiel`, `population`, `approval`, `leadershipPoints`,
-  `log: string[]`.
-- `EventDef`: `id`, `turnTrigger` (a turn number or `'random'`), `text`,
-  `choices` (each with `label`, `effects` as a partial `GameState` of deltas,
-  and `resultText`).
+- `GameState`: `daysElapsed`, `materiel`, `population`, `approval`,
+  `leadershipPoints`, `log: string[]`. `daysElapsed` is fractional; the whole
+  number is what the readout and log lines show.
+- `EventDef`: `id`, `dayTrigger` (a day number or `'random'`, with
+  `earliestDay`), `title`, `text`, `choices` (each with `label`, `effects` as a
+  partial `GameState` of deltas, `resultText`, and an optional `delayed` payload
+  of `{ afterDays, effects, text }`).
+- `GameSession` wraps `GameState` with the clock (`speed`, `lastTickAt`), the
+  pending event, queued delayed effects and fleets.
 
-Two additions beyond that spec, both needed to express the seeded content:
+`Effects` deliberately excludes `daysElapsed`: time comes from the clock, never
+from a choice's deltas.
 
-- `EventDef.title`, since the decision panel shows a title above the body text.
-- `Choice.delayed`, a `{ afterTurns, effects, text }` payload for the choices
-  written as "materiel up over time" and "leadership points up later". It is
-  queued on choice and released during a later `advanceTurn`.
+Daily drift (`DAILY_UPKEEP` in `src/game/state.ts`) is materiel -1.2,
+population +1, approval -0.4, leadership +0.2. The scripted events now span 22
+days where they once spanned 5 turns, so the old per turn drift was scaled to
+roughly a fifth to keep the same economic pressure; a run to day 30 lands within
+a few points of where the turn based version landed at its last scripted event.
 
-Random events carry `earliestTurn`; the frontier fleet event is eligible from
-turn 7 and fires with a 50% chance per turn until it does.
-
-`GameState` and `EventDef` are untouched by the map view. The map layer adds
-`Fleet` and a `fleets` array on `GameSession` (session state, not game
-resources), and `src/game/systems.ts` holds the four systems plus an
-`EVENT_SCOPE` map from event id to system id or `'global'`. That mapping lives
-there rather than on `EventDef` so `events.ts` and the core types stay as they
-were; an event id missing from the map falls back to `'global'`.
-
-## Events
-
-Turns 1 to 5 are scripted: the fall of New Virginia, refugee transports,
-emergency conscription, Directorate industrial estimates, and a frontier
-senator's criticism. From turn 7 the random frontier fleet event reuses the
-turn 4 structure (fund reconnaissance vs. rely on existing estimates) with new
-framing, to test how a repeated event at that cadence feels.
-
-Events live in `src/game/events.ts`; adding one is a single object in that array,
-plus a line in `EVENT_SCOPE` if it belongs to a system rather than the nation.
+`src/game/systems.ts` holds the four systems plus an `EVENT_SCOPE` map from
+event id to system id or `'global'`, keeping event content free of layout
+concerns. An event id missing from that map falls back to `'global'`.
 
 ## Files
 
 - `src/game/events.ts` — event content.
-- `src/game/state.ts` — reducer: choices, upkeep, delayed effects, fleet moves.
+- `src/game/state.ts` — the clock, the reducer, upkeep, delayed effects, fleets.
 - `src/game/systems.ts` — systems, controllers, map positions, event scope.
-- `src/components/` — `SystemMap`, `SystemPanel` (tabs), `DecisionCard` (shared
-  by the Political tab and the national banner).
+- `src/game/fleets.ts` — transit helpers shared by the map and the panel.
+- `src/components/` — `SystemMap`, `SystemPanel` (tabs), `SpeedControls`,
+  `DecisionCard` (shared by the Political tab and the national banner).

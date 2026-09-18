@@ -3,7 +3,7 @@ import type { EventDef } from './types';
 export const EVENTS: EventDef[] = [
   {
     id: 'fall-of-new-virginia',
-    turnTrigger: 1,
+    dayTrigger: 0,
     title: 'The Fall of New Virginia',
     text:
       'NEW VIRGINIA HAS FALLEN. Congress is in emergency session. The Directorate struck ' +
@@ -35,7 +35,7 @@ export const EVENTS: EventDef[] = [
   },
   {
     id: 'refugee-transports',
-    turnTrigger: 2,
+    dayTrigger: 4,
     title: 'Refugee Transports at Earth Orbit',
     text:
       'Refugee transports from New Virginia are requesting clearance to dock at Earth orbital ' +
@@ -66,7 +66,7 @@ export const EVENTS: EventDef[] = [
   },
   {
     id: 'conscription-authority',
-    turnTrigger: 3,
+    dayTrigger: 9,
     title: 'Emergency Conscription Authority',
     text:
       'Military planners request emergency conscription authority, citing the scale of the ' +
@@ -79,7 +79,7 @@ export const EVENTS: EventDef[] = [
           'Conscription notices go out across the core worlds. Industry loses hands now; the ' +
           'formations they fill will pay for themselves later.',
         delayed: {
-          afterTurns: 2,
+          afterDays: 6,
           effects: { materiel: 18 },
           text: 'Conscripted formations reach the line and captured production comes back online.',
         },
@@ -101,7 +101,7 @@ export const EVENTS: EventDef[] = [
   },
   {
     id: 'directorate-industry',
-    turnTrigger: 4,
+    dayTrigger: 15,
     title: 'Directorate Industrial Estimates',
     text:
       "Intelligence reports the Directorate's industrial capacity may be larger than previously " +
@@ -114,7 +114,7 @@ export const EVENTS: EventDef[] = [
           'A deep reconnaissance flight is authorized. The ships are gone for weeks; what they ' +
           'bring back will shape the campaign.',
         delayed: {
-          afterTurns: 2,
+          afterDays: 7,
           effects: { leadershipPoints: 3 },
           text: 'The reconnaissance flight returns with hard numbers on Directorate industry.',
         },
@@ -129,7 +129,7 @@ export const EVENTS: EventDef[] = [
   },
   {
     id: 'frontier-senator',
-    turnTrigger: 5,
+    dayTrigger: 22,
     title: 'A Senator from the Frontier',
     text:
       'A senator from a former Confederate world publicly questions whether the war could have ' +
@@ -160,8 +160,8 @@ export const EVENTS: EventDef[] = [
   },
   {
     id: 'frontier-fleet-movement',
-    turnTrigger: 'random',
-    earliestTurn: 7,
+    dayTrigger: 'random',
+    earliestDay: 28,
     title: 'Unconfirmed Fleet Movement',
     text:
       'An unconfirmed report places a Directorate fleet massing near another frontier system. ' +
@@ -174,7 +174,7 @@ export const EVENTS: EventDef[] = [
           'Scouts are diverted to the frontier system. The Republic pays now for a picture it will ' +
           'not have for weeks.',
         delayed: {
-          afterTurns: 2,
+          afterDays: 7,
           effects: { leadershipPoints: 3 },
           text: 'Scouts confirm the frontier fleet report and chart its approach lanes.',
         },

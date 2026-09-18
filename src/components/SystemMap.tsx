@@ -1,7 +1,9 @@
 import { HOME_SYSTEM_ID, SYSTEMS, systemById } from '../game/systems';
+import { daysOut } from '../game/fleets';
 import type { Fleet } from '../game/types';
 
 interface Props {
+  daysElapsed: number;
   selectedId: string | null;
   pendingSystemId: string | null;
   fleets: Fleet[];
@@ -10,18 +12,25 @@ interface Props {
 
 const HOME = systemById(HOME_SYSTEM_ID);
 
-function transitPosition(fleet: Fleet) {
+function transitPosition(fleet: Fleet, daysElapsed: number) {
   const from = systemById(fleet.origin);
   const to = systemById(fleet.destination);
-  if (!from || !to || fleet.totalTurns === 0) return null;
-  const progress = (fleet.totalTurns - fleet.turnsRemaining) / fleet.totalTurns;
+  const trip = fleet.arrivalDay - fleet.departureDay;
+  if (!from || !to || trip <= 0) return null;
+  const progress = Math.min(1, Math.max(0, (daysElapsed - fleet.departureDay) / trip));
   return {
     x: from.x + (to.x - from.x) * progress,
     y: from.y + (to.y - from.y) * progress,
   };
 }
 
-export default function SystemMap({ selectedId, pendingSystemId, fleets, onSelect }: Props) {
+export default function SystemMap({
+  daysElapsed,
+  selectedId,
+  pendingSystemId,
+  fleets,
+  onSelect,
+}: Props) {
   const stationed = (systemId: string) => fleets.filter((f) => f.location === systemId);
 
   return (
@@ -41,7 +50,7 @@ export default function SystemMap({ selectedId, pendingSystemId, fleets, onSelec
       </svg>
 
       {fleets.map((fleet) => {
-        const position = transitPosition(fleet);
+        const position = transitPosition(fleet, daysElapsed);
         if (!position) return null;
         return (
           <div
@@ -53,7 +62,7 @@ export default function SystemMap({ selectedId, pendingSystemId, fleets, onSelec
               ▸
             </span>
             <span className="fleet-marker-label">
-              {fleet.name} · {fleet.turnsRemaining}
+              {fleet.name} · {daysOut(fleet, daysElapsed)}d
             </span>
           </div>
         );

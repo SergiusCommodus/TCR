@@ -1,5 +1,6 @@
 import { findEvent } from '../game/events';
-import { TRAVEL_TURNS } from '../game/state';
+import { daysOut } from '../game/fleets';
+import { TRAVEL_DAYS } from '../game/state';
 import { CONTROLLER_LABEL, SYSTEMS, systemName } from '../game/systems';
 import type { SystemDef } from '../game/systems';
 import type { Fleet } from '../game/types';
@@ -10,6 +11,7 @@ export type Tab = (typeof TABS)[number];
 
 interface Props {
   system: SystemDef;
+  daysElapsed: number;
   /** The pending event id when it belongs to this system, otherwise null. */
   pendingEventId: string | null;
   fleets: Fleet[];
@@ -31,11 +33,12 @@ function Placeholder({ title, children }: { title: string; children: string }) {
 
 interface MilitaryProps {
   system: SystemDef;
+  daysElapsed: number;
   fleets: Fleet[];
   onAssignFleet: (fleetId: string, destinationId: string) => void;
 }
 
-function MilitaryTab({ system, fleets, onAssignFleet }: MilitaryProps) {
+function MilitaryTab({ system, daysElapsed, fleets, onAssignFleet }: MilitaryProps) {
   const stationed = fleets.filter((f) => f.location === system.id);
   const inbound = fleets.filter((f) => f.destination === system.id);
   const destinations = SYSTEMS.filter((s) => s.id !== system.id);
@@ -54,15 +57,15 @@ function MilitaryTab({ system, fleets, onAssignFleet }: MilitaryProps) {
 
         {inbound.map((fleet) => (
           <p key={fleet.id} className="quiet">
-            {fleet.name} inbound from {systemName(fleet.origin)}, {fleet.turnsRemaining} turn
-            {fleet.turnsRemaining === 1 ? '' : 's'} out.
+            {fleet.name} inbound from {systemName(fleet.origin)}, {daysOut(fleet, daysElapsed)} day
+            {daysOut(fleet, daysElapsed) === 1 ? '' : 's'} out.
           </p>
         ))}
 
         {stationed.map((fleet) => (
           <div key={fleet.id} className="fleet-order">
             <p className="fleet-name">{fleet.name} — stationed</p>
-            <p className="quiet">Assign a destination ({TRAVEL_TURNS} turns in transit):</p>
+            <p className="quiet">Assign a destination ({TRAVEL_DAYS} days in transit):</p>
             <div className="fleet-buttons">
               {destinations.map((target) => (
                 <button
@@ -83,6 +86,7 @@ function MilitaryTab({ system, fleets, onAssignFleet }: MilitaryProps) {
 
 export default function SystemPanel({
   system,
+  daysElapsed,
   pendingEventId,
   fleets,
   tab,
@@ -124,7 +128,12 @@ export default function SystemPanel({
         aria-labelledby={`tab-${tab}`}
       >
         {tab === 'Military' && (
-          <MilitaryTab system={system} fleets={fleets} onAssignFleet={onAssignFleet} />
+          <MilitaryTab
+            system={system}
+            daysElapsed={daysElapsed}
+            fleets={fleets}
+            onAssignFleet={onAssignFleet}
+          />
         )}
 
         {tab === 'Buildings' && (

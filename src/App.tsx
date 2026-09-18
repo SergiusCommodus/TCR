@@ -1,11 +1,17 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import DecisionCard from './components/DecisionCard';
+import SpeedControls from './components/SpeedControls';
 import SystemMap from './components/SystemMap';
 import SystemPanel from './components/SystemPanel';
 import type { Tab } from './components/SystemPanel';
 import { findEvent } from './game/events';
-import { initialSession, reducer } from './game/state';
+import { dayLabel, initialSession, reducer } from './game/state';
 import { HOME_SYSTEM_ID, SYSTEMS, scopeOf, systemById, systemName } from './game/systems';
+import type { Speed } from './game/types';
+
+/** How often the clock is settled against the wall clock. Elapsed real time is
+ *  measured each time, so the interval's own jitter cannot accumulate. */
+const TICK_MS = 100;
 
 /** The system a pending event belongs to, or null when it is national in scope. */
 function pendingSystemOf(pendingEventId: string | null): string | null {
@@ -16,11 +22,10 @@ function pendingSystemOf(pendingEventId: string | null): string | null {
 
 export default function App() {
   const [session, dispatch] = useReducer(reducer, undefined, initialSession);
-  const { state, pendingEventId, fleets } = session;
+  const { state, speed, pendingEventId, fleets } = session;
 
   const pendingSystemId = pendingSystemOf(pendingEventId);
-  const globalEvent =
-    pendingEventId && !pendingSystemId ? findEvent(pendingEventId) : undefined;
+  const globalEvent = pendingEventId && !pendingSystemId ? findEvent(pendingEventId) : undefined;
 
   const [selectedId, setSelectedId] = useState<string>(
     () => pendingSystemOf(session.pendingEventId) ?? HOME_SYSTEM_ID,
@@ -37,6 +42,18 @@ export default function App() {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [state.log.length]);
+
+  useEffect(() => {
+    if (speed === 0 || pendingEventId) return;
+    const id = window.setInterval(
+      () => dispatch({ type: 'tick', now: performance.now() }),
+      TICK_MS,
+    );
+    return () => window.clearInterval(id);
+  }, [speed, pendingEventId]);
+
+  const setSpeed = (next: Speed) =>
+    dispatch({ type: 'setSpeed', speed: next, now: performance.now() });
 
   const openPendingSystem = () => {
     if (!pendingSystemId) return;
@@ -57,11 +74,26 @@ export default function App() {
           <h1>Continental Republic</h1>
           <p>War Command</p>
         </div>
-        <dl className="briefing">
-          <div>
-            <dt>Turn</dt>
-            <dd>{state.turn}</dd>
+
+        <div className="clock">
+          <div className="clock-readout">
+            <span className="clock-label">Day</span>
+            <span className="clock-day">{dayLabel(state.daysElapsed)}</span>
           </div>
+          <div
+            className="day-progress"
+            role="progressbar"
+            aria-label="Progress through the current day"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.floor((state.daysElapsed % 1) * 100)}
+          >
+            <span style={{ width: `${(state.daysElapsed % 1) * 100}%` }} />
+          </div>
+          <SpeedControls speed={speed} locked={Boolean(pendingEventId)} onChange={setSpeed} />
+        </div>
+
+        <dl className="briefing">
           <div>
             <dt>Materiel</dt>
             <dd>{state.materiel}</dd>
@@ -99,6 +131,7 @@ export default function App() {
 
       <main className="stage">
         <SystemMap
+          daysElapsed={state.daysElapsed}
           selectedId={selectedId}
           pendingSystemId={pendingSystemId}
           fleets={fleets}
@@ -106,6 +139,7 @@ export default function App() {
         />
         <SystemPanel
           system={selected}
+          daysElapsed={state.daysElapsed}
           pendingEventId={pendingSystemId === selected.id ? pendingEventId : null}
           fleets={fleets}
           tab={tab}
@@ -125,17 +159,11 @@ export default function App() {
           ))}
         </div>
         <div className="actions">
-          <button
-            onClick={() => dispatch({ type: 'advanceTurn' })}
-            disabled={Boolean(pendingEventId)}
-          >
-            Advance Turn
-          </button>
           <button className="secondary" onClick={restart}>
             Restart
           </button>
           {pendingEventId && (
-            <p className="quiet">Resolve the pending decision before advancing.</p>
+            <p className="quiet">Clock paused. Resolve the pending decision to resume.</p>
           )}
         </div>
       </footer>
