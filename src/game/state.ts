@@ -1,5 +1,6 @@
 import { EVENTS, findEvent } from './events';
-import type { Effects, EventDef, GameSession, GameState, QueuedEffects } from './types';
+import { HOME_SYSTEM_ID, systemName } from './systems';
+import type { Effects, EventDef, Fleet, GameSession, GameState, QueuedEffects } from './types';
 
 export const INITIAL_STATE: GameState = {
   turn: 1,
@@ -20,6 +21,30 @@ const UPKEEP: Effects = {
 
 /** Chance per turn that an eligible random event fires. */
 const RANDOM_EVENT_CHANCE = 0.5;
+
+/** Turns any fleet takes to cross between two systems. */
+export const TRAVEL_TURNS = 2;
+
+const INITIAL_FLEETS: Fleet[] = [
+  {
+    id: 'first-fleet',
+    name: 'First Fleet',
+    location: HOME_SYSTEM_ID,
+    origin: null,
+    destination: null,
+    turnsRemaining: 0,
+    totalTurns: 0,
+  },
+  {
+    id: 'third-fleet',
+    name: 'Third Fleet',
+    location: 'anchorage',
+    origin: null,
+    destination: null,
+    turnsRemaining: 0,
+    totalTurns: 0,
+  },
+];
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -59,6 +84,7 @@ export function initialSession(): GameSession {
     pendingEventId: opening ? opening.id : null,
     firedEventIds: opening ? [opening.id] : [],
     queued: [],
+    fleets: INITIAL_FLEETS,
   };
 }
 
@@ -79,8 +105,35 @@ function pickEventForTurn(turn: number, firedEventIds: string[]): EventDef | und
 
 export type GameAction =
   | { type: 'choose'; choiceIndex: number }
+  | { type: 'assignFleet'; fleetId: string; destinationId: string }
   | { type: 'advanceTurn' }
   | { type: 'reset' };
+
+/** Moves every in-transit fleet one turn closer, logging transit and arrivals. */
+function moveFleets(fleets: Fleet[], turn: number, log: string[]): Fleet[] {
+  return fleets.map((fleet) => {
+    if (!fleet.destination) return fleet;
+
+    const turnsRemaining = fleet.turnsRemaining - 1;
+    if (turnsRemaining > 0) {
+      log.push(
+        `Turn ${turn} — ${fleet.name} under way to ${systemName(fleet.destination)}, ` +
+          `${turnsRemaining} turn${turnsRemaining === 1 ? '' : 's'} out.`,
+      );
+      return { ...fleet, turnsRemaining };
+    }
+
+    log.push(`Turn ${turn} — ${fleet.name} arrives at ${systemName(fleet.destination)}.`);
+    return {
+      ...fleet,
+      location: fleet.destination,
+      origin: null,
+      destination: null,
+      turnsRemaining: 0,
+      totalTurns: 0,
+    };
+  });
+}
 
 export function reducer(session: GameSession, action: GameAction): GameSession {
   switch (action.type) {
@@ -131,6 +184,8 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
         log.push(`Turn ${turn} — ${entry.text} (${describeEffects(entry.effects)})`);
       }
 
+      const fleets = moveFleets(session.fleets, turn, log);
+
       const event = pickEventForTurn(turn, session.firedEventIds);
       if (event) {
         log.push(`Turn ${turn} — Incoming dispatch: ${event.title}.`);
@@ -141,6 +196,37 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
         pendingEventId: event ? event.id : null,
         firedEventIds: event ? [...session.firedEventIds, event.id] : session.firedEventIds,
         queued,
+        fleets,
+      };
+    }
+
+    case 'assignFleet': {
+      const fleet = session.fleets.find((f) => f.id === action.fleetId);
+      if (!fleet || fleet.destination || !fleet.location) return session;
+      if (fleet.location === action.destinationId) return session;
+
+      const turn = session.state.turn;
+      const log = [
+        ...session.state.log,
+        `Turn ${turn} — ${fleet.name} ordered from ${systemName(fleet.location)} to ` +
+          `${systemName(action.destinationId)}; ETA ${TRAVEL_TURNS} turns.`,
+      ];
+
+      return {
+        ...session,
+        state: { ...session.state, log },
+        fleets: session.fleets.map((f) =>
+          f.id === fleet.id
+            ? {
+                ...f,
+                location: null,
+                origin: fleet.location,
+                destination: action.destinationId,
+                turnsRemaining: TRAVEL_TURNS,
+                totalTurns: TRAVEL_TURNS,
+              }
+            : f,
+        ),
       };
     }
 

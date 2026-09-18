@@ -40,9 +40,24 @@ export interface QueuedEffects {
   text: string;
 }
 
+/** An abstract fleet. Stationed at a system, or in transit between two. */
+export interface Fleet {
+  id: string;
+  name: string;
+  /** Set while stationed; null while in transit. */
+  location: string | null;
+  /** Set while in transit; null while stationed. */
+  origin: string | null;
+  destination: string | null;
+  turnsRemaining: number;
+  /** Trip length, kept so the map can interpolate progress. */
+  totalTurns: number;
+}
+
 export interface GameSession {
   state: GameState;
   pendingEventId: string | null;
   firedEventIds: string[];
   queued: QueuedEffects[];
+  fleets: Fleet[];
 }

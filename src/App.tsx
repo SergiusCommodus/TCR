@@ -1,11 +1,36 @@
-import { useEffect, useReducer, useRef } from 'react';
+import { useEffect, useReducer, useRef, useState } from 'react';
+import DecisionCard from './components/DecisionCard';
+import SystemMap from './components/SystemMap';
+import SystemPanel from './components/SystemPanel';
+import type { Tab } from './components/SystemPanel';
 import { findEvent } from './game/events';
-import { describeEffects, initialSession, reducer } from './game/state';
+import { initialSession, reducer } from './game/state';
+import { HOME_SYSTEM_ID, SYSTEMS, scopeOf, systemById, systemName } from './game/systems';
+
+/** The system a pending event belongs to, or null when it is national in scope. */
+function pendingSystemOf(pendingEventId: string | null): string | null {
+  if (!pendingEventId) return null;
+  const scope = scopeOf(pendingEventId);
+  return scope === 'global' ? null : scope;
+}
 
 export default function App() {
   const [session, dispatch] = useReducer(reducer, undefined, initialSession);
-  const { state, pendingEventId } = session;
-  const event = pendingEventId ? findEvent(pendingEventId) : undefined;
+  const { state, pendingEventId, fleets } = session;
+
+  const pendingSystemId = pendingSystemOf(pendingEventId);
+  const globalEvent =
+    pendingEventId && !pendingSystemId ? findEvent(pendingEventId) : undefined;
+
+  const [selectedId, setSelectedId] = useState<string>(
+    () => pendingSystemOf(session.pendingEventId) ?? HOME_SYSTEM_ID,
+  );
+  const [tab, setTab] = useState<Tab>('Political');
+
+  const selected = systemById(selectedId) ?? SYSTEMS[0];
+  /** A system decision is only on screen when its system is open on the Political tab. */
+  const decisionVisible =
+    pendingSystemId !== null && pendingSystemId === selectedId && tab === 'Political';
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -13,12 +38,25 @@ export default function App() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [state.log.length]);
 
-  return (
-    <main>
-      <h1>Continental Republic — War Command</h1>
+  const openPendingSystem = () => {
+    if (!pendingSystemId) return;
+    setSelectedId(pendingSystemId);
+    setTab('Political');
+  };
 
-      <section className="panel">
-        <h2>Briefing</h2>
+  const restart = () => {
+    dispatch({ type: 'reset' });
+    setSelectedId(pendingSystemOf(initialSession().pendingEventId) ?? HOME_SYSTEM_ID);
+    setTab('Political');
+  };
+
+  return (
+    <div className="app">
+      <header className="status-bar">
+        <div className="identity">
+          <h1>Continental Republic</h1>
+          <p>War Command</p>
+        </div>
         <dl className="briefing">
           <div>
             <dt>Turn</dt>
@@ -37,36 +75,49 @@ export default function App() {
             <dd>{state.approval}</dd>
           </div>
           <div>
-            <dt>Leadership Points</dt>
+            <dt>Leadership</dt>
             <dd>{state.leadershipPoints}</dd>
           </div>
         </dl>
-      </section>
+      </header>
 
-      <section className="panel">
-        <h2>Decision</h2>
-        {event ? (
-          <>
-            <h3>{event.title}</h3>
-            <p>{event.text}</p>
-            <div className="choices">
-              {event.choices.map((choice, index) => (
-                <button
-                  key={choice.label}
-                  onClick={() => dispatch({ type: 'choose', choiceIndex: index })}
-                >
-                  <span className="choice-label">{choice.label}</span>
-                  <span className="choice-effects">{describeEffects(choice.effects)}</span>
-                </button>
-              ))}
-            </div>
-          </>
-        ) : (
-          <p className="quiet">No decision pending. Advance the turn.</p>
-        )}
-      </section>
+      {globalEvent && (
+        <section className="global-banner" aria-label="National decision">
+          <p className="banner-eyebrow">Congress in session — national decision</p>
+          <DecisionCard
+            event={globalEvent}
+            onChoose={(choiceIndex) => dispatch({ type: 'choose', choiceIndex })}
+          />
+        </section>
+      )}
 
-      <section className="panel">
+      {pendingSystemId && !decisionVisible && (
+        <button className="pending-hint" onClick={openPendingSystem}>
+          Decision pending at {systemName(pendingSystemId)} — open its Political tab
+        </button>
+      )}
+
+      <main className="stage">
+        <SystemMap
+          selectedId={selectedId}
+          pendingSystemId={pendingSystemId}
+          fleets={fleets}
+          onSelect={setSelectedId}
+        />
+        <SystemPanel
+          system={selected}
+          pendingEventId={pendingSystemId === selected.id ? pendingEventId : null}
+          fleets={fleets}
+          tab={tab}
+          onTabChange={setTab}
+          onChoose={(choiceIndex) => dispatch({ type: 'choose', choiceIndex })}
+          onAssignFleet={(fleetId, destinationId) =>
+            dispatch({ type: 'assignFleet', fleetId, destinationId })
+          }
+        />
+      </main>
+
+      <footer className="history">
         <h2>History</h2>
         <div className="log" ref={logRef}>
           {state.log.map((line, index) => (
@@ -74,15 +125,20 @@ export default function App() {
           ))}
         </div>
         <div className="actions">
-          <button onClick={() => dispatch({ type: 'advanceTurn' })} disabled={Boolean(event)}>
+          <button
+            onClick={() => dispatch({ type: 'advanceTurn' })}
+            disabled={Boolean(pendingEventId)}
+          >
             Advance Turn
           </button>
-          <button className="secondary" onClick={() => dispatch({ type: 'reset' })}>
+          <button className="secondary" onClick={restart}>
             Restart
           </button>
+          {pendingEventId && (
+            <p className="quiet">Resolve the pending decision before advancing.</p>
+          )}
         </div>
-        {event && <p className="quiet">Resolve the pending decision before advancing.</p>}
-      </section>
-    </main>
+      </footer>
+    </div>
   );
 }
