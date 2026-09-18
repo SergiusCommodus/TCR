@@ -46,9 +46,11 @@ blue, Directorate red, contested amber). Clicking a node opens its side panel.
 
 - **Status bar** shows the day, a progress bar through the current day, the
   speed controls, and materiel, population, approval and leadership points.
-- **System panel** has four tabs. Military, Buildings and Economy are
+- **System panel** has five tabs. Military, Buildings and Economy are
   placeholders. **Political** is wired to the live event system: when the pending
   event belongs to that system, its title, body and choices render there.
+  **Focus** carries the National Focus tree, another standing national
+  control like Tax Policy, visible whichever system is selected.
 - **National events** (congressional sessions, nationwide decisions) render in a
   banner above the map instead, and stay visible whichever system is selected.
 - **History log** runs along the bottom and records every day's drift, every
@@ -247,6 +249,51 @@ before, but grants 15 manpower rather than costing 8 approval. The delayed
 materiel payoff six days later is untouched. The other two choices on that
 event are untouched.
 
+## National Focus tree
+
+A sixth tab, Focus, carries a single linear path of seven National Focuses
+(`src/game/focuses.ts`), each locked until the one before it completes. Only
+one can be underway at a time, and starting one deducts its `leadershipCost`
+immediately and begins a day based countdown using the exact same absolute
+`completesOnDay` / `settleDueWork` mechanism as fleet transit and ship
+construction — it does not pause the clock, unlike a pending event, combat or
+occupation decision. `GameSession.activeFocus` (the one in progress, or
+`null`) and `completedFocusIds` (finished ones, in path order) are the two
+new live fields; the next startable focus is always the one at
+`completedFocusIds.length` in `FOCUS_PATH`.
+
+| # | Focus | Days | Leadership | Effect |
+| - | --- | --- | --- | --- |
+| 1 | National Mobilization Act | 10 | 2 | Permanent materiel income increase |
+| 2 | Colonial Shipyard Expansion | 14 | 2 | Ship construction time -15% |
+| 3 | Refugee Resettlement Program | 8 | 1 | One time approval increase |
+| 4 | Emergency War Powers Act | 12 | 3 | Permanent leadership income increase, one time approval cost |
+| 5 | Frontier Intelligence Network | 10 | 2 | Placeholder — narrative only for now |
+| 6 | Total War Footing | 16 | 3 | Permanent materiel and manpower increase, ongoing approval drain |
+| 7 | Reconstruction Directive | 12 | 2 | Placeholder hook for future occupation outcomes |
+
+A completed focus's permanent effect is a `dailyModifier` layered onto
+`DAILY_UPKEEP` by `dailyUpkeepFor`, the exact same additive layering tax
+policy already uses — every completed focus with one just adds another term,
+so National Mobilization and Total War Footing's materiel bonuses stack.
+Colonial Shipyard Expansion instead carries a `buildTimeMultiplier` (0.85),
+read by `buildTimeMultiplierFor` wherever a ship's `buildDays` is consumed —
+both queuing a new build order and the Shipyard's advertised time per ship
+apply it, so the button always shows the build time you'll actually get.
+Refugee Resettlement and Emergency War Powers instead carry a one time
+`onComplete` effect, applied the moment the focus completes, the same
+`applyEffects`/`describeEffects` machinery every other effect in the game
+already goes through. Frontier Intelligence and Reconstruction Directive
+carry no numeric effect yet — completing them is still recorded in
+`completedFocusIds` for other systems to read once intelligence and
+occupation outcomes exist to hook into it.
+
+Each focus's start and completion are narrated to the history log in the
+same voice as everything else, and the Focus tab shows the active focus's
+remaining days prominently, both in a summary line above the path and inline
+on its node; completed nodes, the active node and locked future nodes are
+each visually distinct.
+
 ## Data model
 
 `src/game/types.ts`:
@@ -263,7 +310,8 @@ event are untouched.
   and not yet been ordered to attack, a pending occupation if an invasion has
   just succeeded, queued delayed effects, fleets, the build queue, current
   garrison and ground defense strength per system, each system's live
-  controller override, and the standing tax policy.
+  controller override, the standing tax policy, and National Focus
+  progress (`completedFocusIds`, `activeFocus`).
 
 `Effects` deliberately excludes `daysElapsed`: time comes from the clock, never
 from a choice's deltas.
@@ -292,6 +340,8 @@ concerns. An event id missing from that map falls back to `'global'`.
   Shared unchanged by naval combat and ground invasion.
 - `src/game/occupation.ts` — the four occupation choices and the synthetic
   `EventDef` that lets DecisionCard render them.
+- `src/game/focuses.ts` — the seven National Focus definitions: name,
+  description, days, leadership cost, narrated log lines, and effects.
 - `src/components/` — `SystemMap`, `SystemPanel` (tabs, including the
-  Shipyard, Invade and Tax Policy controls), `SpeedControls`, `DecisionCard`
+  Shipyard, Invade, Tax Policy and Focus tree controls), `SpeedControls`, `DecisionCard`
   (shared by the Political tab and the national banner).

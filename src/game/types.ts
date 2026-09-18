@@ -101,6 +101,15 @@ export interface PendingOccupation {
   systemId: string;
 }
 
+/** The National Focus currently underway, counting down on the same day
+ *  based clock as fleet transit and ship construction. */
+export interface ActiveFocus {
+  id: string;
+  /** Absolute day the focus completes, so its countdown is drift free like
+   *  everything else on the clock. */
+  completesOnDay: number;
+}
+
 /** 0 is paused; 1 through 5 are the in game days per real minute. */
 export type Speed = 0 | 1 | 2 | 3 | 4 | 5;
 
@@ -139,4 +148,10 @@ export interface GameSession {
    *  changed again, same as any other policy setting rather than a one time
    *  event choice. */
   taxPolicy: TaxPolicy;
+  /** Ids of completed National Focuses, in path order. The next eligible
+   *  focus is always the one at this array's length in FOCUS_PATH. */
+  completedFocusIds: string[];
+  /** The focus currently in progress, or null when none is. Only one focus
+   *  can ever be underway at a time. */
+  activeFocus: ActiveFocus | null;
 }

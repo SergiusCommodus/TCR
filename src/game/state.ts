@@ -1,5 +1,6 @@
 import { rollCombat } from './combat';
 import { EVENTS, findEvent } from './events';
+import { FOCUS_PATH } from './focuses';
 import { OCCUPATION_CHOICES } from './occupation';
 import {
   applyCompositionLosses,
@@ -12,6 +13,7 @@ import { SHIP_TYPES } from './ships';
 import { HOME_SYSTEM_ID, SYSTEMS, currentController, systemById, systemName } from './systems';
 import { nearestOtherSystem, travelDays } from './travel';
 import type {
+  ActiveFocus,
   BuildOrder,
   Effects,
   EventDef,
@@ -84,14 +86,38 @@ export const TAX_POLICY_LABEL: Record<TaxPolicy, string> = {
 
 export const TAX_POLICIES: TaxPolicy[] = ['low', 'standard', 'wartime'];
 
-/** The day's automatic drift under the given tax policy. */
-function dailyUpkeepFor(taxPolicy: TaxPolicy): Effects {
+/** The day's automatic drift under the given tax policy, with the permanent
+ *  dailyModifier of every completed National Focus layered on top — the same
+ *  additive layering the tax policy modifier itself uses. */
+export function dailyUpkeepFor(taxPolicy: TaxPolicy, completedFocusIds: string[]): Effects {
   const mod = TAX_POLICY_MODIFIERS[taxPolicy];
-  return {
+  const upkeep: Effects = {
     ...DAILY_UPKEEP,
     materiel: (DAILY_UPKEEP.materiel ?? 0) + mod.materiel,
     approval: (DAILY_UPKEEP.approval ?? 0) + mod.approval,
   };
+
+  for (const focus of FOCUS_PATH) {
+    if (!focus.dailyModifier || !completedFocusIds.includes(focus.id)) continue;
+    for (const key of Object.keys(focus.dailyModifier) as (keyof Effects)[]) {
+      upkeep[key] = (upkeep[key] ?? 0) + (focus.dailyModifier[key] ?? 0);
+    }
+  }
+
+  return upkeep;
+}
+
+/** The combined ship construction time multiplier from every completed
+ *  National Focus that shortens it. Focuses without a buildTimeMultiplier
+ *  leave it untouched. */
+export function buildTimeMultiplierFor(completedFocusIds: string[]): number {
+  let multiplier = 1;
+  for (const focus of FOCUS_PATH) {
+    if (focus.buildTimeMultiplier !== undefined && completedFocusIds.includes(focus.id)) {
+      multiplier *= focus.buildTimeMultiplier;
+    }
+  }
+  return multiplier;
 }
 
 const INITIAL_FLEETS: Fleet[] = [
@@ -197,6 +223,8 @@ export function initialSession(): GameSession {
     groundDefenses: initialGroundDefenses(),
     controllerOverrides: {},
     taxPolicy: 'standard',
+    completedFocusIds: [],
+    activeFocus: null,
   };
 }
 
@@ -241,6 +269,8 @@ function runClock(session: GameSession, realMs: number): GameSession {
   let buildQueue: BuildOrder[] = session.buildQueue;
   let nextFleetNumber = session.nextFleetNumber;
   let firedEventIds = session.firedEventIds;
+  let activeFocus = session.activeFocus;
+  let completedFocusIds = session.completedFocusIds;
   let days = session.state.daysElapsed;
   let pendingEventId: string | null = null;
   let pendingCombat: PendingCombat | null = null;
@@ -350,9 +380,23 @@ function runClock(session: GameSession, realMs: number): GameSession {
         }
       }
     }
+
+    if (activeFocus && activeFocus.completesOnDay <= atDay) {
+      const def = FOCUS_PATH.find((f) => f.id === activeFocus!.id);
+      const completed = activeFocus;
+      activeFocus = null;
+      if (def) {
+        if (def.onComplete) resources = applyEffects(resources, def.onComplete);
+        completedFocusIds = [...completedFocusIds, def.id];
+        log.push(
+          `Day ${dayLabel(completed.completesOnDay)} — ${def.completeText}` +
+            (def.onComplete ? ` (${describeEffects(def.onComplete)})` : ''),
+        );
+      }
+    }
   };
 
-  const upkeep = dailyUpkeepFor(session.taxPolicy);
+  const upkeep = dailyUpkeepFor(session.taxPolicy, session.completedFocusIds);
 
   for (let boundary = Math.floor(days) + 1; boundary <= target; boundary++) {
     days = boundary;
@@ -392,6 +436,8 @@ function runClock(session: GameSession, realMs: number): GameSession {
     firedEventIds,
     pendingEventId,
     pendingCombat,
+    activeFocus,
+    completedFocusIds,
   };
 }
 
@@ -403,6 +449,7 @@ export type GameAction =
   | { type: 'commitInvasion'; fleetId: string }
   | { type: 'commitOccupation'; choiceIndex: number }
   | { type: 'setTaxPolicy'; policy: TaxPolicy }
+  | { type: 'startFocus'; focusId: string }
   | { type: 'setSpeed'; speed: Speed; now: number }
   | { type: 'tick'; now: number }
   | { type: 'reset' };
@@ -505,18 +552,22 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
       }
 
       const days = session.state.daysElapsed;
+      const buildDays = Math.max(
+        1,
+        Math.round(def.buildDays * buildTimeMultiplierFor(session.completedFocusIds)),
+      );
       const order: BuildOrder = {
         id: `build-${action.shipType}-${Math.round(days * 1000)}-${session.buildQueue.length}`,
         systemId: action.systemId,
         shipType: action.shipType,
-        completesOnDay: days + def.buildDays,
+        completesOnDay: days + buildDays,
       };
       const cost: Effects = { materiel: -def.materielCost, manpower: -def.manpowerCost };
       const log = [
         ...session.state.log,
         `Day ${dayLabel(days)} — ${def.name} construction begun at ` +
           `${systemName(action.systemId)} (${describeEffects(cost)}); complete in ` +
-          `${def.buildDays} days.`,
+          `${buildDays} days.`,
       ];
 
       return {
@@ -714,6 +765,31 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
       ];
 
       return { ...session, state: { ...session.state, log }, taxPolicy: action.policy };
+    }
+
+    case 'startFocus': {
+      if (session.activeFocus) return session;
+      const index = FOCUS_PATH.findIndex((f) => f.id === action.focusId);
+      // Only the next focus in the path — the one right after however many
+      // are already completed — can ever be started.
+      if (index === -1 || index !== session.completedFocusIds.length) return session;
+      const def = FOCUS_PATH[index];
+      if (session.state.leadershipPoints < def.leadershipCost) return session;
+
+      const days = session.state.daysElapsed;
+      const cost: Effects = { leadershipPoints: -def.leadershipCost };
+      const activeFocus: ActiveFocus = { id: def.id, completesOnDay: days + def.days };
+      const log = [
+        ...session.state.log,
+        `Day ${dayLabel(days)} — ${def.startText} (${describeEffects(cost)}); complete in ` +
+          `${def.days} days.`,
+      ];
+
+      return {
+        ...session,
+        state: { ...applyEffects(session.state, cost), log },
+        activeFocus,
+      };
     }
 
     case 'reset':

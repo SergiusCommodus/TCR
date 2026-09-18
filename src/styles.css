@@ -550,6 +550,80 @@ body {
   border-top: 1px dashed var(--line);
 }
 
+.focus-active-summary {
+  margin: 0;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--republic);
+  border-radius: 3px;
+  background: var(--republic-dim);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.focus-path {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.focus-node {
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--line-bright);
+  border-radius: 3px;
+  padding: 0.6rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.focus-node p {
+  margin: 0;
+}
+
+.focus-node.is-complete {
+  border-left-color: var(--republic);
+  opacity: 0.75;
+}
+
+.focus-node.is-active {
+  border-left-color: var(--contested);
+  background: rgba(224, 161, 58, 0.08);
+}
+
+.focus-node.is-locked {
+  opacity: 0.5;
+}
+
+.focus-node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.focus-node-name {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.focus-node-tag {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 0.1rem 0.3rem;
+  white-space: nowrap;
+}
+
+.focus-remaining {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--contested);
+}
+
 .combat-orders {
   border: 1px solid var(--directorate);
   border-left-width: 3px;

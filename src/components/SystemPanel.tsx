@@ -1,8 +1,9 @@
 import { findEvent } from '../game/events';
-import { buildDaysOut, daysOut, describeComposition, fleetStrength } from '../game/fleets';
+import { buildDaysOut, daysOut, daysUntil, describeComposition, fleetStrength } from '../game/fleets';
+import { FOCUS_PATH } from '../game/focuses';
 import { occupationEventFor } from '../game/occupation';
 import { SHIP_TYPE_LIST, SHIP_TYPES } from '../game/ships';
-import { TAX_POLICIES, TAX_POLICY_LABEL } from '../game/state';
+import { TAX_POLICIES, TAX_POLICY_LABEL, buildTimeMultiplierFor } from '../game/state';
 import {
   CONTROLLER_LABEL,
   HOME_SYSTEM_ID,
@@ -13,6 +14,7 @@ import {
 import { travelDays } from '../game/travel';
 import type { Controller, SystemDef } from '../game/systems';
 import type {
+  ActiveFocus,
   BuildOrder,
   Fleet,
   PendingCombat,
@@ -22,7 +24,7 @@ import type {
 } from '../game/types';
 import DecisionCard from './DecisionCard';
 
-export const TABS = ['Military', 'Buildings', 'Economy', 'Political'] as const;
+export const TABS = ['Military', 'Buildings', 'Economy', 'Political', 'Focus'] as const;
 export type Tab = (typeof TABS)[number];
 
 interface Props {
@@ -42,6 +44,9 @@ interface Props {
   fleets: Fleet[];
   buildQueue: BuildOrder[];
   taxPolicy: TaxPolicy;
+  completedFocusIds: string[];
+  activeFocus: ActiveFocus | null;
+  leadershipPoints: number;
   tab: Tab;
   onTabChange: (tab: Tab) => void;
   onChoose: (choiceIndex: number) => void;
@@ -51,6 +56,7 @@ interface Props {
   onCommitInvasion: (fleetId: string) => void;
   onCommitOccupation: (choiceIndex: number) => void;
   onSetTaxPolicy: (policy: TaxPolicy) => void;
+  onStartFocus: (focusId: string) => void;
 }
 
 function Placeholder({ title, children }: { title: string; children: string }) {
@@ -70,6 +76,7 @@ interface MilitaryProps {
   manpower: number;
   fleets: Fleet[];
   buildQueue: BuildOrder[];
+  completedFocusIds: string[];
   pendingCombat: PendingCombat | null;
   garrisonStrength: number;
   groundDefenseStrength: number;
@@ -122,6 +129,7 @@ function BuildPanel({
   materiel,
   manpower,
   buildQueue,
+  completedFocusIds,
   onBuildShip,
 }: {
   system: SystemDef;
@@ -129,9 +137,11 @@ function BuildPanel({
   materiel: number;
   manpower: number;
   buildQueue: BuildOrder[];
+  completedFocusIds: string[];
   onBuildShip: (systemId: string, shipType: ShipType) => void;
 }) {
   const queueHere = buildQueue.filter((order) => order.systemId === system.id);
+  const buildMultiplier = buildTimeMultiplierFor(completedFocusIds);
 
   return (
     <section className="tab-section">
@@ -140,10 +150,11 @@ function BuildPanel({
       <div className="fleet-buttons">
         {SHIP_TYPE_LIST.map((def) => {
           const affordable = materiel >= def.materielCost && manpower >= def.manpowerCost;
+          const buildDays = Math.max(1, Math.round(def.buildDays * buildMultiplier));
           const cost =
             def.manpowerCost > 0
-              ? `${def.materielCost} materiel, ${def.manpowerCost} manpower, ${def.buildDays}d`
-              : `${def.materielCost} materiel, ${def.buildDays}d`;
+              ? `${def.materielCost} materiel, ${def.manpowerCost} manpower, ${buildDays}d`
+              : `${def.materielCost} materiel, ${buildDays}d`;
           return (
             <button
               key={def.id}
@@ -206,6 +217,90 @@ function TaxPolicyControl({
   );
 }
 
+function FocusTreeControl({
+  daysElapsed,
+  leadershipPoints,
+  completedFocusIds,
+  activeFocus,
+  onStartFocus,
+}: {
+  daysElapsed: number;
+  leadershipPoints: number;
+  completedFocusIds: string[];
+  activeFocus: ActiveFocus | null;
+  onStartFocus: (focusId: string) => void;
+}) {
+  const nextIndex = completedFocusIds.length;
+  const active = activeFocus ? FOCUS_PATH.find((f) => f.id === activeFocus.id) : undefined;
+  const remaining = activeFocus ? daysUntil(activeFocus.completesOnDay, daysElapsed) : null;
+
+  return (
+    <section className="tab-section focus-tree">
+      <h4>National Focus</h4>
+      <p className="quiet">
+        A single national track of policy and mobilization. Only one focus can be underway at a
+        time, and each unlocks the next.
+      </p>
+
+      {active && remaining !== null && (
+        <p className="focus-active-summary">
+          {active.name} underway — {remaining} day{remaining === 1 ? '' : 's'} remaining.
+        </p>
+      )}
+
+      <div className="focus-path">
+        {FOCUS_PATH.map((focus, index) => {
+          const completed = index < nextIndex;
+          const isActive = index === nextIndex && activeFocus?.id === focus.id;
+          const isNext = index === nextIndex && !isActive;
+          const locked = index > nextIndex;
+          const affordable = leadershipPoints >= focus.leadershipCost;
+          const focusRemaining =
+            isActive && activeFocus ? daysUntil(activeFocus.completesOnDay, daysElapsed) : null;
+
+          const status = completed
+            ? 'is-complete'
+            : isActive
+              ? 'is-active'
+              : locked
+                ? 'is-locked'
+                : 'is-next';
+
+          return (
+            <div key={focus.id} className={`focus-node ${status}`}>
+              <div className="focus-node-head">
+                <span className="focus-node-name">{focus.name}</span>
+                {completed && <span className="focus-node-tag">Completed</span>}
+                {isActive && <span className="focus-node-tag">In progress</span>}
+                {locked && <span className="focus-node-tag">Locked</span>}
+              </div>
+              <p className="quiet">{focus.description}</p>
+              <p className="quiet">
+                {focus.days} days · {focus.leadershipCost} leadership
+              </p>
+              {isActive && focusRemaining !== null && (
+                <p className="focus-remaining">
+                  {focusRemaining} day{focusRemaining === 1 ? '' : 's'} remaining
+                </p>
+              )}
+              {isNext && (
+                <button
+                  className="ghost"
+                  disabled={!affordable}
+                  title={affordable ? undefined : 'Not enough leadership points'}
+                  onClick={() => onStartFocus(focus.id)}
+                >
+                  Begin
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function MilitaryTab({
   system,
   daysElapsed,
@@ -213,6 +308,7 @@ function MilitaryTab({
   manpower,
   fleets,
   buildQueue,
+  completedFocusIds,
   pendingCombat,
   garrisonStrength,
   groundDefenseStrength,
@@ -251,6 +347,7 @@ function MilitaryTab({
           materiel={materiel}
           manpower={manpower}
           buildQueue={buildQueue}
+          completedFocusIds={completedFocusIds}
           onBuildShip={onBuildShip}
         />
       )}
@@ -336,6 +433,9 @@ export default function SystemPanel({
   fleets,
   buildQueue,
   taxPolicy,
+  completedFocusIds,
+  activeFocus,
+  leadershipPoints,
   tab,
   onTabChange,
   onChoose,
@@ -345,6 +445,7 @@ export default function SystemPanel({
   onCommitInvasion,
   onCommitOccupation,
   onSetTaxPolicy,
+  onStartFocus,
 }: Props) {
   const event = pendingEventId ? findEvent(pendingEventId) : undefined;
   const controller = currentController(system, controllerOverrides);
@@ -392,6 +493,7 @@ export default function SystemPanel({
             manpower={manpower}
             fleets={fleets}
             buildQueue={buildQueue}
+            completedFocusIds={completedFocusIds}
             pendingCombat={pendingCombat}
             garrisonStrength={garrisons[system.id] ?? 0}
             groundDefenseStrength={groundDefenses[system.id] ?? 0}
@@ -426,6 +528,16 @@ export default function SystemPanel({
             )}
             <TaxPolicyControl taxPolicy={taxPolicy} onSetTaxPolicy={onSetTaxPolicy} />
           </>
+        )}
+
+        {tab === 'Focus' && (
+          <FocusTreeControl
+            daysElapsed={daysElapsed}
+            leadershipPoints={leadershipPoints}
+            completedFocusIds={completedFocusIds}
+            activeFocus={activeFocus}
+            onStartFocus={onStartFocus}
+          />
         )}
       </div>
     </aside>

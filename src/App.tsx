@@ -22,8 +22,17 @@ function pendingSystemOf(pendingEventId: string | null): string | null {
 
 export default function App() {
   const [session, dispatch] = useReducer(reducer, undefined, initialSession);
-  const { state, speed, pendingEventId, pendingCombat, pendingOccupation, taxPolicy, fleets } =
-    session;
+  const {
+    state,
+    speed,
+    pendingEventId,
+    pendingCombat,
+    pendingOccupation,
+    taxPolicy,
+    fleets,
+    completedFocusIds,
+    activeFocus,
+  } = session;
 
   const pendingSystemId = pendingSystemOf(pendingEventId);
   const globalEvent = pendingEventId && !pendingSystemId ? findEvent(pendingEventId) : undefined;
@@ -195,6 +204,9 @@ export default function App() {
           fleets={fleets}
           buildQueue={session.buildQueue}
           taxPolicy={taxPolicy}
+          completedFocusIds={completedFocusIds}
+          activeFocus={activeFocus}
+          leadershipPoints={state.leadershipPoints}
           tab={tab}
           onTabChange={setTab}
           onChoose={(choiceIndex) => dispatch({ type: 'choose', choiceIndex })}
@@ -206,6 +218,7 @@ export default function App() {
           onCommitInvasion={(fleetId) => dispatch({ type: 'commitInvasion', fleetId })}
           onCommitOccupation={(choiceIndex) => dispatch({ type: 'commitOccupation', choiceIndex })}
           onSetTaxPolicy={(policy) => dispatch({ type: 'setTaxPolicy', policy })}
+          onStartFocus={(focusId) => dispatch({ type: 'startFocus', focusId })}
         />
       </main>
 
