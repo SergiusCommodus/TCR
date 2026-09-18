@@ -743,6 +743,15 @@ button.ghost:hover {
   background: var(--republic-dim);
 }
 
+button.ghost.invade {
+  border-color: var(--directorate);
+  color: var(--directorate);
+}
+
+button.ghost.invade:hover {
+  background: var(--directorate-dim);
+}
+
 .actions button:disabled {
   background: transparent;
   color: var(--muted);

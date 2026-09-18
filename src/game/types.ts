@@ -1,3 +1,5 @@
+import type { Controller } from './systems';
+
 export interface GameState {
   /** In game days since the Directorate attack, as a fraction; the clock drives it. */
   daysElapsed: number;
@@ -43,8 +45,9 @@ export interface QueuedEffects {
   text: string;
 }
 
-/** The two ship types available for construction. */
-export type ShipType = 'escort' | 'cruiser';
+/** The three ship types available for construction. Transport carries
+ *  ground troops instead of fighting: its combat strength is 0. */
+export type ShipType = 'escort' | 'cruiser' | 'transport';
 
 /** How many of each ship type a fleet carries. The shape combat resolution
  *  will read from later, so every fleet always has both keys, zero or not. */
@@ -64,6 +67,10 @@ export interface Fleet {
   departureDay: number;
   arrivalDay: number;
   composition: ShipComposition;
+  /** Ground troops this fleet carries, added by completed Transports. Used
+   *  only for a ground invasion at a system this fleet has already won the
+   *  naval battle at — it plays no part in naval combat strength. */
+  groundTroops: number;
 }
 
 /** A ship under construction at a system, counting down on the same day
@@ -84,6 +91,12 @@ export interface PendingCombat {
   systemId: string;
 }
 
+/** A system whose ground defense has just been overrun and is waiting on an
+ *  occupation choice before the clock can resume. */
+export interface PendingOccupation {
+  systemId: string;
+}
+
 /** 0 is paused; 1 through 5 are the in game days per real minute. */
 export type Speed = 0 | 1 | 2 | 3 | 4 | 5;
 
@@ -94,6 +107,7 @@ export interface GameSession {
   lastTickAt: number | null;
   pendingEventId: string | null;
   pendingCombat: PendingCombat | null;
+  pendingOccupation: PendingOccupation | null;
   firedEventIds: string[];
   queued: QueuedEffects[];
   fleets: Fleet[];
@@ -106,4 +120,11 @@ export interface GameSession {
    *  static garrisonStrength and is reduced by combat from there, the same
    *  split as a fleet's live composition versus a ship type's fixed data. */
   garrisons: Record<string, number>;
+  /** Current ground defense per system id, the invasion equivalent of
+   *  garrisons — same static-baseline-versus-live-value split. */
+  groundDefenses: Record<string, number>;
+  /** Systems whose controller has changed from its static SystemDef.controller
+   *  baseline. Sparse: a system absent here is still at its static baseline.
+   *  Currently only ever set by a successful Occupy and Govern choice. */
+  controllerOverrides: Record<string, Controller>;
 }

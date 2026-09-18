@@ -1,8 +1,15 @@
 import { rollCombat } from './combat';
 import { EVENTS, findEvent } from './events';
-import { applyCompositionLosses, describeComposition, fleetStrength, nextFleetName } from './fleets';
+import { OCCUPATION_CHOICES } from './occupation';
+import {
+  applyCompositionLosses,
+  applySurvivingShare,
+  describeComposition,
+  fleetStrength,
+  nextFleetName,
+} from './fleets';
 import { SHIP_TYPES } from './ships';
-import { HOME_SYSTEM_ID, SYSTEMS, systemById, systemName } from './systems';
+import { HOME_SYSTEM_ID, SYSTEMS, currentController, systemById, systemName } from './systems';
 import { nearestOtherSystem, travelDays } from './travel';
 import type {
   BuildOrder,
@@ -54,7 +61,8 @@ const INITIAL_FLEETS: Fleet[] = [
     destination: null,
     departureDay: 0,
     arrivalDay: 0,
-    composition: { escort: 2, cruiser: 1 },
+    composition: { escort: 2, cruiser: 1, transport: 0 },
+    groundTroops: 0,
   },
   {
     id: 'third-fleet',
@@ -64,7 +72,8 @@ const INITIAL_FLEETS: Fleet[] = [
     destination: null,
     departureDay: 0,
     arrivalDay: 0,
-    composition: { escort: 1, cruiser: 1 },
+    composition: { escort: 1, cruiser: 1, transport: 0 },
+    groundTroops: 0,
   },
 ];
 
@@ -82,6 +91,16 @@ function initialGarrisons(): Record<string, number> {
     if (system.garrisonStrength !== undefined) garrisons[system.id] = system.garrisonStrength;
   }
   return garrisons;
+}
+
+/** Starting ground defense per system, the invasion equivalent of
+ *  initialGarrisons(). */
+function initialGroundDefenses(): Record<string, number> {
+  const defenses: Record<string, number> = {};
+  for (const system of SYSTEMS) {
+    if (system.groundDefense !== undefined) defenses[system.id] = system.groundDefense;
+  }
+  return defenses;
 }
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -125,11 +144,14 @@ export function initialSession(): GameSession {
     pendingEventId: opening ? opening.id : null,
     firedEventIds: opening ? [opening.id] : [],
     pendingCombat: null,
+    pendingOccupation: null,
     queued: [],
     fleets: INITIAL_FLEETS,
     buildQueue: [],
     nextFleetNumber: INITIAL_NEXT_FLEET_NUMBER,
     garrisons: initialGarrisons(),
+    groundDefenses: initialGroundDefenses(),
+    controllerOverrides: {},
   };
 }
 
@@ -155,7 +177,13 @@ function pickEventForDay(day: number, firedEventIds: string[]): EventDef | undef
  * in game time runs past a decision the player has not made yet.
  */
 function runClock(session: GameSession, realMs: number): GameSession {
-  if (session.pendingEventId || session.pendingCombat || session.speed === 0 || realMs <= 0) {
+  if (
+    session.pendingEventId ||
+    session.pendingCombat ||
+    session.pendingOccupation ||
+    session.speed === 0 ||
+    realMs <= 0
+  ) {
     return session;
   }
 
@@ -190,8 +218,10 @@ function runClock(session: GameSession, realMs: number): GameSession {
       if (!fleet.destination || fleet.arrivalDay > atDay) return fleet;
 
       const destination = systemById(fleet.destination);
-      const hostile =
-        destination?.controller === 'directorate' || destination?.controller === 'contested';
+      // Live controller, not the static baseline: a system Occupy and Govern
+      // has already flipped to Republic no longer triggers combat on arrival.
+      const controller = destination && currentController(destination, session.controllerOverrides);
+      const hostile = controller === 'directorate' || controller === 'contested';
 
       if (hostile) {
         // Only the first hostile arrival found this pass opens Combat
@@ -241,6 +271,7 @@ function runClock(session: GameSession, realMs: number): GameSession {
                     ...fleet.composition,
                     [order.shipType]: fleet.composition[order.shipType] + 1,
                   },
+                  groundTroops: fleet.groundTroops + def.groundTroopsCarried,
                 }
               : fleet,
           );
@@ -251,7 +282,7 @@ function runClock(session: GameSession, realMs: number): GameSession {
         } else {
           const formed = nextFleetName(fleets, nextFleetNumber);
           nextFleetNumber = formed.next;
-          const composition = { escort: 0, cruiser: 0 } as Record<ShipType, number>;
+          const composition = { escort: 0, cruiser: 0, transport: 0 } as Record<ShipType, number>;
           composition[order.shipType] = 1;
           fleets = [
             ...fleets,
@@ -264,6 +295,7 @@ function runClock(session: GameSession, realMs: number): GameSession {
               departureDay: 0,
               arrivalDay: 0,
               composition,
+              groundTroops: def.groundTroopsCarried,
             },
           ];
           log.push(
@@ -321,6 +353,8 @@ export type GameAction =
   | { type: 'assignFleet'; fleetId: string; destinationId: string }
   | { type: 'buildShip'; systemId: string; shipType: ShipType }
   | { type: 'commitAttack' }
+  | { type: 'commitInvasion'; fleetId: string }
+  | { type: 'commitOccupation'; choiceIndex: number }
   | { type: 'setSpeed'; speed: Speed; now: number }
   | { type: 'tick'; now: number }
   | { type: 'reset' };
@@ -340,7 +374,10 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
         session.lastTickAt === null ? session : runClock(session, action.now - session.lastTickAt);
       return {
         ...settled,
-        speed: settled.pendingEventId || settled.pendingCombat ? 0 : action.speed,
+        speed:
+          settled.pendingEventId || settled.pendingCombat || settled.pendingOccupation
+            ? 0
+            : action.speed,
         lastTickAt: action.now,
       };
     }
@@ -454,6 +491,11 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
         0,
         Math.round(defenderStrength * (1 - outcome.defenderLossFraction)),
       );
+      // Ground troops ride the same ships that just took losses, so they take
+      // the same proportional hit naval combat dealt this fleet — not a
+      // change to naval combat itself, just this new field participating in
+      // the loss it already applies to everything else the fleet carries.
+      const survivingTroops = applySurvivingShare(fleet.groundTroops, outcome.attackerLossFraction);
 
       const log = [
         ...session.state.log,
@@ -478,6 +520,7 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
                 departureDay: 0,
                 arrivalDay: 0,
                 composition: survivors,
+                groundTroops: survivingTroops,
               }
             : f,
         );
@@ -485,6 +528,15 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
           `Day ${dayLabel(days)} — ${fleet.name} holds position at ` +
             `${systemName(pending.systemId)} (${describeComposition(survivors)} remain).`,
         );
+        // No auto-resolved invasion: with troops aboard, Invade becomes
+        // available in this system's Military tab whenever the player
+        // chooses; with none, say plainly why the system stays contested.
+        if (survivingTroops <= 0) {
+          log.push(
+            `Day ${dayLabel(days)} — ${systemName(pending.systemId)} is cleared but cannot be ` +
+              'taken without landing forces; control has not changed hands.',
+          );
+        }
       } else {
         const fallback = nearestOtherSystem(pending.systemId);
         const eta = travelDays(pending.systemId, fallback);
@@ -498,6 +550,7 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
                 departureDay: days,
                 arrivalDay: days + eta,
                 composition: survivors,
+                groundTroops: survivingTroops,
               }
             : f,
         );
@@ -514,6 +567,85 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
         fleets,
         garrisons: { ...session.garrisons, [pending.systemId]: garrisonAfter },
         pendingCombat: null,
+      };
+    }
+
+    case 'commitInvasion': {
+      // Only one thing is ever allowed to pause the game at a time; refusing
+      // here keeps that invariant even though nothing else currently calls
+      // this action while another is pending.
+      if (session.pendingEventId || session.pendingCombat || session.pendingOccupation) {
+        return session;
+      }
+
+      const fleet = session.fleets.find((f) => f.id === action.fleetId);
+      if (!fleet || !fleet.location || fleet.groundTroops <= 0) return session;
+
+      const systemId = fleet.location;
+      const system = systemById(systemId);
+      if (!system || currentController(system, session.controllerOverrides) === 'republic') {
+        return session;
+      }
+
+      const days = session.state.daysElapsed;
+      const attackerStrength = fleet.groundTroops;
+      const defenderStrength = session.groundDefenses[systemId] ?? 0;
+      // Same rollCombat formula naval combat uses, on a different pair of
+      // strengths — nothing about naval combat's own resolution changes.
+      const outcome = rollCombat(attackerStrength, defenderStrength);
+
+      const survivingTroops = applySurvivingShare(fleet.groundTroops, outcome.attackerLossFraction);
+      const defenseAfter = applySurvivingShare(defenderStrength, outcome.defenderLossFraction);
+
+      const log = [
+        ...session.state.log,
+        `Day ${dayLabel(days)} — Invasion committed: ${fleet.name} lands ` +
+          `${Math.round(attackerStrength)} ground troops against ${systemName(systemId)}'s ` +
+          `defense of ${Math.round(defenderStrength)}. ` +
+          `${outcome.attackerWins ? `${fleet.name} secures a foothold on the surface.` : 'The landing is thrown back.'}`,
+      ];
+
+      const fleets = session.fleets.map((f) =>
+        f.id === fleet.id ? { ...f, groundTroops: survivingTroops } : f,
+      );
+      const groundDefenses = { ...session.groundDefenses, [systemId]: defenseAfter };
+
+      if (!outcome.attackerWins) {
+        return { ...session, state: { ...session.state, log }, fleets, groundDefenses };
+      }
+
+      return {
+        ...session,
+        state: { ...session.state, log },
+        fleets,
+        groundDefenses,
+        pendingOccupation: { systemId },
+      };
+    }
+
+    case 'commitOccupation': {
+      const pending = session.pendingOccupation;
+      if (!pending) return session;
+      const choice = OCCUPATION_CHOICES[action.choiceIndex];
+      if (!choice) return session;
+
+      const days = session.state.daysElapsed;
+      const name = systemName(pending.systemId);
+      const log = [
+        ...session.state.log,
+        `Day ${dayLabel(days)} — ${choice.label}: ${choice.resultText(name)} ` +
+          `(${describeEffects(choice.effects)})`,
+      ];
+
+      const controllerOverrides = choice.flipsControl
+        ? { ...session.controllerOverrides, [pending.systemId]: 'republic' as const }
+        : session.controllerOverrides;
+
+      return {
+        ...session,
+        state: { ...applyEffects(session.state, choice.effects), log },
+        controllerOverrides,
+        pendingOccupation: null,
       };
     }
 

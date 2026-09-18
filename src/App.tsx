@@ -22,7 +22,7 @@ function pendingSystemOf(pendingEventId: string | null): string | null {
 
 export default function App() {
   const [session, dispatch] = useReducer(reducer, undefined, initialSession);
-  const { state, speed, pendingEventId, pendingCombat, fleets } = session;
+  const { state, speed, pendingEventId, pendingCombat, pendingOccupation, fleets } = session;
 
   const pendingSystemId = pendingSystemOf(pendingEventId);
   const globalEvent = pendingEventId && !pendingSystemId ? findEvent(pendingEventId) : undefined;
@@ -39,6 +39,10 @@ export default function App() {
   /** Combat Orders lives in the Military tab of the system under attack. */
   const combatVisible =
     pendingCombat !== null && pendingCombat.systemId === selectedId && tab === 'Military';
+  /** The occupation decision lives in the Political tab, same as any other
+   *  system scoped decision. */
+  const occupationVisible =
+    pendingOccupation !== null && pendingOccupation.systemId === selectedId && tab === 'Political';
   const logRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -68,6 +72,12 @@ export default function App() {
     if (!pendingCombat) return;
     setSelectedId(pendingCombat.systemId);
     setTab('Military');
+  };
+
+  const openPendingOccupation = () => {
+    if (!pendingOccupation) return;
+    setSelectedId(pendingOccupation.systemId);
+    setTab('Political');
   };
 
   const restart = () => {
@@ -101,7 +111,7 @@ export default function App() {
           </div>
           <SpeedControls
             speed={speed}
-            locked={Boolean(pendingEventId) || Boolean(pendingCombat)}
+            locked={Boolean(pendingEventId) || Boolean(pendingCombat) || Boolean(pendingOccupation)}
             onChange={setSpeed}
           />
         </div>
@@ -148,12 +158,21 @@ export default function App() {
         </button>
       )}
 
+      {pendingOccupation && !occupationVisible && (
+        <button className="pending-hint" onClick={openPendingOccupation}>
+          Occupation decision pending at {systemName(pendingOccupation.systemId)} — open its
+          Political tab
+        </button>
+      )}
+
       <main className="stage">
         <SystemMap
           daysElapsed={state.daysElapsed}
           selectedId={selectedId}
           pendingSystemId={pendingSystemId}
           pendingCombatSystemId={pendingCombat?.systemId ?? null}
+          pendingOccupationSystemId={pendingOccupation?.systemId ?? null}
+          controllerOverrides={session.controllerOverrides}
           fleets={fleets}
           onSelect={setSelectedId}
         />
@@ -163,7 +182,10 @@ export default function App() {
           materiel={state.materiel}
           pendingEventId={pendingSystemId === selected.id ? pendingEventId : null}
           pendingCombat={pendingCombat?.systemId === selected.id ? pendingCombat : null}
+          pendingOccupation={pendingOccupation?.systemId === selected.id ? pendingOccupation : null}
           garrisons={session.garrisons}
+          groundDefenses={session.groundDefenses}
+          controllerOverrides={session.controllerOverrides}
           fleets={fleets}
           buildQueue={session.buildQueue}
           tab={tab}
@@ -174,6 +196,8 @@ export default function App() {
           }
           onBuildShip={(systemId, shipType) => dispatch({ type: 'buildShip', systemId, shipType })}
           onCommitAttack={() => dispatch({ type: 'commitAttack' })}
+          onCommitInvasion={(fleetId) => dispatch({ type: 'commitInvasion', fleetId })}
+          onCommitOccupation={(choiceIndex) => dispatch({ type: 'commitOccupation', choiceIndex })}
         />
       </main>
 
@@ -188,9 +212,11 @@ export default function App() {
           <button className="secondary" onClick={restart}>
             Restart
           </button>
-          {(pendingEventId || pendingCombat) && (
+          {(pendingEventId || pendingCombat || pendingOccupation) && (
             <p className="quiet">
-              Clock paused. Resolve the pending {pendingEventId ? 'decision' : 'combat'} to resume.
+              Clock paused. Resolve the pending{' '}
+              {pendingEventId ? 'decision' : pendingCombat ? 'combat' : 'occupation decision'} to
+              resume.
             </p>
           )}
         </div>

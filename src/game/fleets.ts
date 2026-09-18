@@ -54,21 +54,24 @@ export function nextFleetName(fleets: Fleet[], from: number): { name: string; ne
 }
 
 export function emptyComposition(): ShipComposition {
-  return { escort: 0, cruiser: 0 };
+  return { escort: 0, cruiser: 0, transport: 0 };
 }
 
 export function totalShips(composition: ShipComposition): number {
-  return composition.escort + composition.cruiser;
+  return (Object.keys(SHIP_TYPES) as ShipType[]).reduce(
+    (total, type) => total + composition[type],
+    0,
+  );
 }
 
 export function sumComposition(fleets: Fleet[]): ShipComposition {
-  return fleets.reduce(
-    (total, fleet) => ({
-      escort: total.escort + fleet.composition.escort,
-      cruiser: total.cruiser + fleet.composition.cruiser,
-    }),
-    emptyComposition(),
-  );
+  return fleets.reduce((total, fleet) => {
+    const sum = { ...total };
+    for (const type of Object.keys(SHIP_TYPES) as ShipType[]) {
+      sum[type] = total[type] + fleet.composition[type];
+    }
+    return sum;
+  }, emptyComposition());
 }
 
 /** "2 Escorts, 1 Cruiser", or "no ships" for an empty composition. */
@@ -97,15 +100,24 @@ export function fleetStrength(composition: ShipComposition): number {
   );
 }
 
+/** Reduces a plain count by a loss fraction (0 = untouched, 1 = wiped out),
+ *  rounded to a whole number and never negative. Shared by ship counts,
+ *  garrison and ground defense strength, and ground troops — anything
+ *  expressed as a single number that takes proportional combat losses. */
+export function applySurvivingShare(value: number, lossFraction: number): number {
+  const survivingShare = Math.max(0, Math.min(1, 1 - lossFraction));
+  return Math.max(0, Math.round(value * survivingShare));
+}
+
 /** Reduces a composition by a loss fraction (0 = untouched, 1 = wiped out),
  *  applying the same fraction to every ship type and rounding to whole ships. */
 export function applyCompositionLosses(
   composition: ShipComposition,
   lossFraction: number,
 ): ShipComposition {
-  const survivingShare = Math.max(0, Math.min(1, 1 - lossFraction));
-  return {
-    escort: Math.round(composition.escort * survivingShare),
-    cruiser: Math.round(composition.cruiser * survivingShare),
-  };
+  const result = { ...composition };
+  for (const type of Object.keys(SHIP_TYPES) as ShipType[]) {
+    result[type] = applySurvivingShare(composition[type], lossFraction);
+  }
+  return result;
 }

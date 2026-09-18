@@ -10,13 +10,18 @@ export interface SystemDef {
   x: number;
   y: number;
   /**
-   * Starting defensive strength for a Directorate or contested system —
+   * Starting naval defensive strength for a Directorate or contested system —
    * undefined for a Republic one, which is never attacked. This is the
    * baseline a fresh game starts from; the strength that actually changes as
    * battles are fought lives in GameSession.garrisons, not here, the same
    * split as a ship type's fixed data versus a fleet's live composition.
    */
   garrisonStrength?: number;
+  /** Starting ground defensive strength, the invasion equivalent of
+   *  garrisonStrength — a separate number, since a system can be navally
+   *  cleared without being taken. Same static/live split, in
+   *  GameSession.groundDefenses. */
+  groundDefense?: number;
 }
 
 export const CONTROLLER_LABEL: Record<Controller, string> = {
@@ -42,6 +47,7 @@ export const SYSTEMS: SystemDef[] = [
     x: 76,
     y: 30,
     garrisonStrength: 8,
+    groundDefense: 6,
   },
   {
     id: 'anchorage',
@@ -59,6 +65,7 @@ export const SYSTEMS: SystemDef[] = [
     x: 68,
     y: 80,
     garrisonStrength: 4,
+    groundDefense: 3,
   },
 ];
 
@@ -94,4 +101,13 @@ export function systemById(id: string | null): SystemDef | undefined {
 
 export function systemName(id: string | null): string {
   return systemById(id)?.name ?? 'unknown space';
+}
+
+/** A system's live controller: its static baseline, unless a successful
+ *  Occupy and Govern choice has overridden it. */
+export function currentController(
+  system: SystemDef,
+  overrides: Record<string, Controller>,
+): Controller {
+  return overrides[system.id] ?? system.controller;
 }

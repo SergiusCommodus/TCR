@@ -1,6 +1,7 @@
-import { SYSTEMS, systemById } from '../game/systems';
+import { SYSTEMS, currentController, systemById } from '../game/systems';
 import { daysOut, describeComposition, fleetLabel, sumComposition } from '../game/fleets';
 import { systemPairs } from '../game/travel';
+import type { Controller } from '../game/systems';
 import type { Fleet } from '../game/types';
 
 interface Props {
@@ -8,6 +9,8 @@ interface Props {
   selectedId: string | null;
   pendingSystemId: string | null;
   pendingCombatSystemId: string | null;
+  pendingOccupationSystemId: string | null;
+  controllerOverrides: Record<string, Controller>;
   fleets: Fleet[];
   onSelect: (systemId: string) => void;
 }
@@ -35,6 +38,8 @@ export default function SystemMap({
   selectedId,
   pendingSystemId,
   pendingCombatSystemId,
+  pendingOccupationSystemId,
+  controllerOverrides,
   fleets,
   onSelect,
 }: Props) {
@@ -82,7 +87,7 @@ export default function SystemMap({
         return (
           <button
             key={system.id}
-            className={`node node-${system.controller}${
+            className={`node node-${currentController(system, controllerOverrides)}${
               selectedId === system.id ? ' is-selected' : ''
             }`}
             style={{ left: `${system.x}%`, top: `${system.y}%` }}
@@ -96,6 +101,9 @@ export default function SystemMap({
             <span className="node-meta">
               {pendingSystemId === system.id && <span className="node-tag">decision</span>}
               {pendingCombatSystemId === system.id && <span className="node-tag">combat</span>}
+              {pendingOccupationSystemId === system.id && (
+                <span className="node-tag">occupation</span>
+              )}
               {here.length > 0 && (
                 <span className="node-tag node-tag-fleet">
                   {here.length === 1

@@ -1,10 +1,17 @@
 import { findEvent } from '../game/events';
 import { buildDaysOut, daysOut, describeComposition, fleetStrength } from '../game/fleets';
+import { occupationEventFor } from '../game/occupation';
 import { SHIP_TYPE_LIST, SHIP_TYPES } from '../game/ships';
-import { CONTROLLER_LABEL, HOME_SYSTEM_ID, SYSTEMS, systemName } from '../game/systems';
+import {
+  CONTROLLER_LABEL,
+  HOME_SYSTEM_ID,
+  SYSTEMS,
+  currentController,
+  systemName,
+} from '../game/systems';
 import { travelDays } from '../game/travel';
-import type { SystemDef } from '../game/systems';
-import type { BuildOrder, Fleet, PendingCombat, ShipType } from '../game/types';
+import type { Controller, SystemDef } from '../game/systems';
+import type { BuildOrder, Fleet, PendingCombat, PendingOccupation, ShipType } from '../game/types';
 import DecisionCard from './DecisionCard';
 
 export const TABS = ['Military', 'Buildings', 'Economy', 'Political'] as const;
@@ -18,7 +25,11 @@ interface Props {
   pendingEventId: string | null;
   /** Set only when this system is the one the pending combat is at. */
   pendingCombat: PendingCombat | null;
+  /** Set only when this system is the one the pending occupation is at. */
+  pendingOccupation: PendingOccupation | null;
   garrisons: Record<string, number>;
+  groundDefenses: Record<string, number>;
+  controllerOverrides: Record<string, Controller>;
   fleets: Fleet[];
   buildQueue: BuildOrder[];
   tab: Tab;
@@ -27,6 +38,8 @@ interface Props {
   onAssignFleet: (fleetId: string, destinationId: string) => void;
   onBuildShip: (systemId: string, shipType: ShipType) => void;
   onCommitAttack: () => void;
+  onCommitInvasion: (fleetId: string) => void;
+  onCommitOccupation: (choiceIndex: number) => void;
 }
 
 function Placeholder({ title, children }: { title: string; children: string }) {
@@ -47,9 +60,12 @@ interface MilitaryProps {
   buildQueue: BuildOrder[];
   pendingCombat: PendingCombat | null;
   garrisonStrength: number;
+  groundDefenseStrength: number;
+  isHostile: boolean;
   onAssignFleet: (fleetId: string, destinationId: string) => void;
   onBuildShip: (systemId: string, shipType: ShipType) => void;
   onCommitAttack: () => void;
+  onCommitInvasion: (fleetId: string) => void;
 }
 
 function CombatOrdersPanel({
@@ -150,9 +166,12 @@ function MilitaryTab({
   buildQueue,
   pendingCombat,
   garrisonStrength,
+  groundDefenseStrength,
+  isHostile,
   onAssignFleet,
   onBuildShip,
   onCommitAttack,
+  onCommitInvasion,
 }: MilitaryProps) {
   const stationed = fleets.filter((f) => f.location === system.id);
   // Fleets that departed from this system and are currently between here and
@@ -211,6 +230,29 @@ function MilitaryTab({
           <div key={fleet.id} className="fleet-order">
             <p className="fleet-name">{fleet.name} — stationed</p>
             <p className="quiet">{describeComposition(fleet.composition)}</p>
+
+            {isHostile && (
+              <p className="quiet">
+                {fleet.groundTroops > 0
+                  ? `${fleet.groundTroops} ground troops aboard.`
+                  : 'No ground troops aboard.'}
+              </p>
+            )}
+
+            {isHostile && fleet.groundTroops > 0 && (
+              <div className="fleet-buttons">
+                <button className="ghost invade" onClick={() => onCommitInvasion(fleet.id)}>
+                  Invade · defense {groundDefenseStrength}
+                </button>
+              </div>
+            )}
+
+            {isHostile && fleet.groundTroops <= 0 && (
+              <p className="quiet">
+                The system is cleared but cannot be taken without landing forces.
+              </p>
+            )}
+
             <p className="quiet">Assign a destination:</p>
             <div className="fleet-buttons">
               {destinations.map((target) => (
@@ -236,7 +278,10 @@ export default function SystemPanel({
   materiel,
   pendingEventId,
   pendingCombat,
+  pendingOccupation,
   garrisons,
+  groundDefenses,
+  controllerOverrides,
   fleets,
   buildQueue,
   tab,
@@ -245,13 +290,18 @@ export default function SystemPanel({
   onAssignFleet,
   onBuildShip,
   onCommitAttack,
+  onCommitInvasion,
+  onCommitOccupation,
 }: Props) {
   const event = pendingEventId ? findEvent(pendingEventId) : undefined;
+  const controller = currentController(system, controllerOverrides);
+  const isHostile = controller !== 'republic';
+  const occupationEvent = pendingOccupation ? occupationEventFor(system.name) : undefined;
 
   return (
     <aside className="system-panel">
-      <header className={`panel-head head-${system.controller}`}>
-        <p className="panel-eyebrow">{CONTROLLER_LABEL[system.controller]}</p>
+      <header className={`panel-head head-${controller}`}>
+        <p className="panel-eyebrow">{CONTROLLER_LABEL[controller]}</p>
         <h2>{system.name}</h2>
         <p className="panel-note">{system.note}</p>
       </header>
@@ -268,7 +318,9 @@ export default function SystemPanel({
             onClick={() => onTabChange(name)}
           >
             {name}
-            {name === 'Political' && event && <span className="tab-alert" aria-hidden="true" />}
+            {name === 'Political' && (event || occupationEvent) && (
+              <span className="tab-alert" aria-hidden="true" />
+            )}
           </button>
         ))}
       </div>
@@ -288,9 +340,12 @@ export default function SystemPanel({
             buildQueue={buildQueue}
             pendingCombat={pendingCombat}
             garrisonStrength={garrisons[system.id] ?? 0}
+            groundDefenseStrength={groundDefenses[system.id] ?? 0}
+            isHostile={isHostile}
             onAssignFleet={onAssignFleet}
             onBuildShip={onBuildShip}
             onCommitAttack={onCommitAttack}
+            onCommitInvasion={onCommitInvasion}
           />
         )}
 
@@ -308,7 +363,9 @@ export default function SystemPanel({
 
         {tab === 'Political' && (
           <>
-            {event ? (
+            {occupationEvent ? (
+              <DecisionCard event={occupationEvent} onChoose={onCommitOccupation} />
+            ) : event ? (
               <DecisionCard event={event} onChoose={onChoose} />
             ) : (
               <p className="quiet">No decision pending in this system.</p>

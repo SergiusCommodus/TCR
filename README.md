@@ -154,16 +154,67 @@ independent ±20% variance and whichever total is higher wins. Both sides take
 losses: the winner's loss fraction is proportional to how close the fight
 was (0 at a rout, up to 50% at a near-even fight), and the loser's is the
 complement of that (as low as 50%, up to a full wipe at a rout). Losses are
-split proportionally across a fleet's Escort and Cruiser counts, rounded to
-whole ships. If the attacker wins, the fleet holds position at the system
-(composition reduced) and the garrison weakens; if the defender wins, the
-fleet's survivors — if any — retreat to the nearest other system by travel
-time, or the fleet is destroyed outright if the loss rounds it down to zero
-ships. There is no capture yet: a won engagement weakens the garrison but
-never changes who controls the system — that's a hook for a ground invasion
-mechanic to add later, once ground units exist. A fleet mid-combat can't be
-reassigned (it still holds a destination, so the same guard that blocks
-reassigning an in-transit fleet already covers it).
+split proportionally across a fleet's ship counts, rounded to whole ships. If
+the attacker wins, the fleet holds position at the system (composition
+reduced) and the garrison weakens; if the defender wins, the fleet's
+survivors — if any — retreat to the nearest other system by travel time, or
+the fleet is destroyed outright if the loss rounds it down to zero ships. A
+fleet mid-combat can't be reassigned (it still holds a destination, so the
+same guard that blocks reassigning an in-transit fleet already covers it).
+
+Winning a naval battle only clears the system's naval defense — it never
+changes who controls the system by itself. That takes a ground invasion.
+
+## Ground invasion and occupation
+
+A third ship type, Transport (`src/game/ships.ts`): cost and build time
+between Escort and Cruiser, 0 combat strength, and a `groundTroopsCarried` of
+2 — the only ship type that adds to a fleet's separate `groundTroops` count
+rather than fighting. Each Directorate or contested system also carries a
+`groundDefense` baseline, distinct from its naval `garrisonStrength` — New
+Virginia 6, Shiloh 3 — tracked live in `GameSession.groundDefenses`, the same
+static/live split as everything else here.
+
+Ground troops ride the same ships that take naval losses, so a fleet's
+`groundTroops` takes the identical proportional hit its composition does in
+`commitAttack` — this doesn't change naval combat's own resolution, just
+extends the loss it already applies to the rest of the fleet to this new
+field too. If the attacker wins the naval battle with 0 ground troops
+surviving, the log says the system is cleared but cannot be taken without
+landing forces, and control stays as it was.
+
+With ground troops aboard, a stationed fleet at a hostile system shows an
+Invade button (labelled with the defense strength) in its Military tab —
+available whenever the player chooses, not a forced pause; naval combat
+already made the player commit to being there. Committing resolves troops
+against `groundDefense` with the exact same `rollCombat` naval combat uses,
+applying `applySurvivingShare` to both sides same as naval losses. A loss
+that leaves the fleet with 0 ground troops needs a fresh Transport to try
+again; one that leaves troops standing can simply retry, since a failed
+attempt still wears down the defense.
+
+A won invasion opens an Occupation Decision, pausing the clock like any
+other event: four choices in `src/game/occupation.ts` — Bombard, Enslave and
+Deport, Exterminate, Occupy and Govern — each with a population and approval
+effect (there is no per-system population tracked, so the consequence is
+narrated as falling on the taken system while mechanically landing on the
+same national totals every other choice in the game already uses). Bombard
+and Exterminate are the most severe on population, Enslave and Deport falls
+between, Occupy and Govern is the least severe and the only one that costs
+the Republic nothing in approval — the other three cost it, on the read that
+a nominally democratic Republic pays a political price for atrocity even in
+wartime. Only Occupy and Govern flips the system to Republic control,
+recorded in `GameSession.controllerOverrides` (a system's live controller,
+versus its static `SystemDef.controller` baseline — the same split pattern
+again). The other three leave the system un-flipped: population devastated
+but not administered, a hook for a later "install a government" step. The
+panel reuses the existing `DecisionCard` component via a synthetic
+`EventDef` built on the fly (`occupationEventFor` in `occupation.ts`) rather
+than a second card component — it never enters `EVENTS` or `firedEventIds`.
+
+A system's live controller, not its static baseline, is what decides
+whether an arriving fleet triggers combat at all — a system Occupy and
+Govern has already flipped no longer pauses the clock for a later arrival.
 
 ## Data model
 
@@ -178,8 +229,10 @@ reassigning an in-transit fleet already covers it).
   of `{ afterDays, effects, text }`).
 - `GameSession` wraps `GameState` with the clock (`speed`, `lastTickAt`), the
   pending event, a pending combat if a fleet has arrived at a hostile system
-  and not yet been ordered to attack, queued delayed effects, fleets, the
-  build queue, and current garrison strength per system.
+  and not yet been ordered to attack, a pending occupation if an invasion has
+  just succeeded, queued delayed effects, fleets, the build queue, current
+  garrison and ground defense strength per system, and each system's live
+  controller override.
 
 `Effects` deliberately excludes `daysElapsed`: time comes from the clock, never
 from a choice's deltas.
@@ -204,5 +257,8 @@ concerns. An event id missing from that map falls back to `'global'`.
 - `src/game/travel.ts` — the per-pair travel time table and lane list.
 - `src/game/ships.ts` — ship type data: cost, build time and strength per type.
 - `src/game/combat.ts` — the pure combat roll: strength, variance, losses.
+  Shared unchanged by naval combat and ground invasion.
+- `src/game/occupation.ts` — the four occupation choices and the synthetic
+  `EventDef` that lets DecisionCard render them.
 - `src/components/` — `SystemMap`, `SystemPanel` (tabs), `SpeedControls`,
   `DecisionCard` (shared by the Political tab and the national banner).

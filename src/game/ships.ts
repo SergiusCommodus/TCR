@@ -10,12 +10,17 @@ export interface ShipTypeDef {
   buildDays: number;
   /** Combat strength this ship contributes to its fleet's total. */
   strength: number;
+  /** Ground troops added to a fleet's groundTroops when this ship completes.
+   *  Zero for every type except Transport. */
+  groundTroopsCarried: number;
 }
 
 /**
- * The two ship types available for construction. Placeholder costs, build
+ * The three ship types available for construction. Placeholder costs, build
  * times and strengths, kept as simple data so they're easy to retune later:
- * Escort is cheap, fast, and weak; Cruiser is costlier, slower, and strong.
+ * Escort is cheap, fast, and weak; Cruiser is costlier, slower, and strong;
+ * Transport sits between the two in cost and build time, fights for neither
+ * side (strength 0), and carries ground troops instead.
  */
 export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
   escort: {
@@ -25,6 +30,7 @@ export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
     materielCost: 15,
     buildDays: 4,
     strength: 1,
+    groundTroopsCarried: 0,
   },
   cruiser: {
     id: 'cruiser',
@@ -33,9 +39,20 @@ export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
     materielCost: 40,
     buildDays: 10,
     strength: 3,
+    groundTroopsCarried: 0,
+  },
+  transport: {
+    id: 'transport',
+    name: 'Transport',
+    pluralName: 'Transports',
+    materielCost: 25,
+    buildDays: 7,
+    strength: 0,
+    groundTroopsCarried: 2,
   },
 };
 
-/** Escort then Cruiser, matching the order SHIP_TYPES declares them in — used
- *  wherever ship types are listed (build buttons, composition summaries). */
+/** Escort, Cruiser, then Transport, matching the order SHIP_TYPES declares
+ *  them in — used wherever ship types are listed (build buttons, composition
+ *  summaries). */
 export const SHIP_TYPE_LIST: ShipTypeDef[] = Object.values(SHIP_TYPES);
