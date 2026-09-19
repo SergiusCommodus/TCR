@@ -23,12 +23,14 @@ export interface FocusDef {
 }
 
 /**
- * The National Focus tree: a single linear path of seven focuses. Each is
+ * The National Focus tree: a single linear path of eleven focuses. Each is
  * locked until the one before it completes, and only one can be underway at
  * a time. Placeholder numbers throughout are scaled against the baseline
  * daily drift (materiel -1.2, approval -0.4, leadershipPoints +0.2, manpower
  * +0.5) so "slightly" and "notable" read as meaningfully different sizes of
- * bonus rather than arbitrary ones.
+ * bonus rather than arbitrary ones. The last four escalate further still,
+ * larger effects at higher day and leadership costs, reflecting a nation
+ * further committed to total war.
  */
 export const FOCUS_PATH: FocusDef[] = [
   {
@@ -118,5 +120,72 @@ export const FOCUS_PATH: FocusDef[] = [
     completeText:
       'The Reconstruction Directive is in place, ready to stabilize any world the Republic retakes.',
     // Placeholder hook: occupation outcomes do not yet read completedFocusIds.
+  },
+  {
+    id: 'emergency-requisition-powers',
+    name: 'Emergency Requisition Powers',
+    description:
+      "Grants the war economy sweeping requisition authority over colonial industry, permanently " +
+      "lifting materiel output well beyond the National Mobilization Act's reach, at a cost to " +
+      'public patience.',
+    days: 14,
+    leadershipCost: 3,
+    startText:
+      'Congress extends emergency requisition powers over every colonial industry still ' +
+      'answering to Sol.',
+    completeText:
+      'Emergency Requisition Powers take full effect; materiel flows from worlds that used to ' +
+      'keep more of what they made.',
+    onComplete: { approval: -6 },
+    dailyModifier: { materiel: 0.7 },
+  },
+  {
+    id: 'unified-war-production-board',
+    name: 'Unified War Production Board',
+    description:
+      'Centralizes every shipyard still under Republic control behind a single wartime ' +
+      'production board, cutting construction times well beyond what the Colonial Shipyard ' +
+      'Expansion alone achieved.',
+    days: 18,
+    leadershipCost: 4,
+    startText: 'A Unified War Production Board stands up, with authority over every Republic shipyard.',
+    completeText:
+      'The Unified War Production Board is fully operational; hulls move through Republic yards ' +
+      'faster than at any point since the war began.',
+    buildTimeMultiplier: 0.8,
+  },
+  {
+    id: 'total-mobilization-decree',
+    name: 'Total Mobilization Decree',
+    description:
+      'Converts what remains of the civilian economy to war production outright — a far more ' +
+      'total commitment than Total War Footing alone, at a matching cost to public patience.',
+    days: 20,
+    leadershipCost: 4,
+    startText:
+      'The Total Mobilization Decree is signed, placing what remains of the civilian economy ' +
+      'under direct war footing.',
+    completeText:
+      'Total Mobilization takes hold across every Republic world still standing; materiel and ' +
+      'manpower surge again, and so does the strain.',
+    dailyModifier: { materiel: 1.2, manpower: 0.8, approval: -0.6 },
+  },
+  {
+    id: 'continental-defense-initiative',
+    name: 'Continental Defense Initiative',
+    description:
+      'Frames the war as what it has become: an existential defense of the Continental Republic ' +
+      'itself. A permanent boost to leadership decision making, and a nation that finally, fully, ' +
+      'believes it.',
+    days: 22,
+    leadershipCost: 5,
+    startText:
+      'The Continental Defense Initiative is declared from the Capitol steps: the Republic ' +
+      'stands or falls together.',
+    completeText:
+      'The Continental Defense Initiative takes hold; the war cabinet moves with a speed and ' +
+      'unity it has not had since New Virginia fell.',
+    onComplete: { approval: 8 },
+    dailyModifier: { leadershipPoints: 0.3 },
   },
 ];

@@ -1,8 +1,10 @@
+import { DIRECTORATE_NAVAL_SHARE } from '../game/directorate';
 import { findEvent } from '../game/events';
 import { buildDaysOut, daysOut, daysUntil, describeComposition, fleetStrength } from '../game/fleets';
 import { FOCUS_PATH } from '../game/focuses';
 import { occupationEventFor } from '../game/occupation';
 import { SHIP_TYPE_LIST, SHIP_TYPES } from '../game/ships';
+import { STANCES, STANCE_LABEL, estimateWinChance } from '../game/stance';
 import { TAX_POLICIES, TAX_POLICY_LABEL, buildTimeMultiplierFor } from '../game/state';
 import {
   CONTROLLER_LABEL,
@@ -13,11 +15,13 @@ import {
 } from '../game/systems';
 import { travelDays } from '../game/travel';
 import type { Controller, SystemDef } from '../game/systems';
+import type { CombatStance } from '../game/stance';
 import type {
   ActiveFocus,
   BuildOrder,
   Fleet,
   PendingCombat,
+  PendingDirectorateCombat,
   PendingOccupation,
   ShipType,
   TaxPolicy,
@@ -38,6 +42,12 @@ interface Props {
   pendingCombat: PendingCombat | null;
   /** Set only when this system is the one the pending occupation is at. */
   pendingOccupation: PendingOccupation | null;
+  /** Set only when this system is the one a Directorate attack has arrived
+   *  at and is awaiting a defend stance choice. */
+  pendingDirectorateCombat: PendingDirectorateCombat | null;
+  /** The Directorate's abstract fleet strength — only shown once a fleet
+   *  built from it has actually arrived and is engaging here. */
+  directorateFleetStrength: number;
   garrisons: Record<string, number>;
   groundDefenses: Record<string, number>;
   controllerOverrides: Record<string, Controller>;
@@ -52,7 +62,8 @@ interface Props {
   onChoose: (choiceIndex: number) => void;
   onAssignFleet: (fleetId: string, destinationId: string) => void;
   onBuildShip: (systemId: string, shipType: ShipType) => void;
-  onCommitAttack: () => void;
+  onCommitAttack: (stance: CombatStance) => void;
+  onCommitDirectorateDefense: (stance: CombatStance) => void;
   onCommitInvasion: (fleetId: string) => void;
   onCommitOccupation: (choiceIndex: number) => void;
   onSetTaxPolicy: (policy: TaxPolicy) => void;
@@ -78,47 +89,73 @@ interface MilitaryProps {
   buildQueue: BuildOrder[];
   completedFocusIds: string[];
   pendingCombat: PendingCombat | null;
+  pendingDirectorateCombat: PendingDirectorateCombat | null;
+  directorateFleetStrength: number;
   garrisonStrength: number;
   groundDefenseStrength: number;
   isHostile: boolean;
   onAssignFleet: (fleetId: string, destinationId: string) => void;
   onBuildShip: (systemId: string, shipType: ShipType) => void;
-  onCommitAttack: () => void;
+  onCommitAttack: (stance: CombatStance) => void;
+  onCommitDirectorateDefense: (stance: CombatStance) => void;
   onCommitInvasion: (fleetId: string) => void;
 }
 
+/**
+ * The combat stance panel: reused both for a player initiated attack on a
+ * Directorate or contested system and for defending a Republic system a
+ * Directorate attack has just reached. `playerLabel`/`playerStrength` is
+ * always the side the player is choosing a stance for, whichever side of
+ * the engagement that happens to be; `opponentLabel`/`opponentStrength` is
+ * the other side, unmodified by any stance. Three buttons replace the old
+ * single Commit to Attack button, each showing an estimated win chance
+ * before the player commits.
+ */
 function CombatOrdersPanel({
-  fleet,
-  attackerStrength,
-  defenderStrength,
-  onCommitAttack,
+  heading,
+  narrative,
+  playerLabel,
+  playerComposition,
+  playerStrength,
+  opponentLabel,
+  opponentStrength,
+  onCommit,
 }: {
-  fleet: Fleet;
-  attackerStrength: number;
-  defenderStrength: number;
-  onCommitAttack: () => void;
+  heading: string;
+  narrative: string;
+  playerLabel: string;
+  playerComposition?: Fleet['composition'];
+  playerStrength: number;
+  opponentLabel: string;
+  opponentStrength: number;
+  onCommit: (stance: CombatStance) => void;
 }) {
   return (
     <section className="tab-section combat-orders">
-      <h4>Combat Orders</h4>
-      <p className="quiet">
-        {fleet.name} has arrived and is holding at the system edge, awaiting orders.
-      </p>
+      <h4>{heading}</h4>
+      <p className="quiet">{narrative}</p>
       <div className="combat-sides">
         <div className="combat-side">
-          <p className="combat-side-label">Attacking</p>
-          <p className="fleet-name">{fleet.name}</p>
-          <p className="quiet">{describeComposition(fleet.composition)}</p>
-          <p className="combat-strength">{attackerStrength} strength</p>
+          <p className="combat-side-label">{playerLabel}</p>
+          {playerComposition && <p className="quiet">{describeComposition(playerComposition)}</p>}
+          <p className="combat-strength">{Math.round(playerStrength)} strength</p>
         </div>
         <div className="combat-side combat-side-defender">
-          <p className="combat-side-label">Defending garrison</p>
-          <p className="combat-strength">{defenderStrength} strength</p>
+          <p className="combat-side-label">{opponentLabel}</p>
+          <p className="combat-strength">{Math.round(opponentStrength)} strength</p>
         </div>
       </div>
-      <button className="commit-attack" onClick={onCommitAttack}>
-        Commit to Attack
-      </button>
+      <p className="quiet">Choose a stance — an estimate, not a guarantee:</p>
+      <div className="stance-choices">
+        {STANCES.map((stance) => (
+          <button key={stance} className="stance-button" onClick={() => onCommit(stance)}>
+            <span className="stance-name">{STANCE_LABEL[stance]}</span>
+            <span className="stance-chance">
+              {estimateWinChance(playerStrength, opponentStrength, stance)}% est. win
+            </span>
+          </button>
+        ))}
+      </div>
     </section>
   );
 }
@@ -310,12 +347,15 @@ function MilitaryTab({
   buildQueue,
   completedFocusIds,
   pendingCombat,
+  pendingDirectorateCombat,
+  directorateFleetStrength,
   garrisonStrength,
   groundDefenseStrength,
   isHostile,
   onAssignFleet,
   onBuildShip,
   onCommitAttack,
+  onCommitDirectorateDefense,
   onCommitInvasion,
 }: MilitaryProps) {
   const stationed = fleets.filter((f) => f.location === system.id);
@@ -324,15 +364,33 @@ function MilitaryTab({
   const transiting = fleets.filter((f) => f.origin === system.id);
   const destinations = SYSTEMS.filter((s) => s.id !== system.id);
   const combatFleet = pendingCombat ? fleets.find((f) => f.id === pendingCombat.fleetId) : undefined;
+  const directorateCombatHere = pendingDirectorateCombat?.systemId === system.id;
+  const defendingStrengthHere = stationed.reduce((sum, f) => sum + fleetStrength(f.composition), 0);
 
   return (
     <>
       {combatFleet && (
         <CombatOrdersPanel
-          fleet={combatFleet}
-          attackerStrength={fleetStrength(combatFleet.composition)}
-          defenderStrength={garrisonStrength}
-          onCommitAttack={onCommitAttack}
+          heading="Combat Orders"
+          narrative={`${combatFleet.name} has arrived and is holding at the system edge, awaiting orders.`}
+          playerLabel="Attacking"
+          playerComposition={combatFleet.composition}
+          playerStrength={fleetStrength(combatFleet.composition)}
+          opponentLabel="Defending garrison"
+          opponentStrength={garrisonStrength}
+          onCommit={onCommitAttack}
+        />
+      )}
+
+      {directorateCombatHere && (
+        <CombatOrdersPanel
+          heading="Combat Orders"
+          narrative="A Directorate fleet has reached this system and is closing on the defending fleet."
+          playerLabel="Defending fleet"
+          playerStrength={defendingStrengthHere}
+          opponentLabel="Directorate fleet"
+          opponentStrength={directorateFleetStrength * DIRECTORATE_NAVAL_SHARE}
+          onCommit={onCommitDirectorateDefense}
         />
       )}
 
@@ -427,6 +485,8 @@ export default function SystemPanel({
   pendingEventId,
   pendingCombat,
   pendingOccupation,
+  pendingDirectorateCombat,
+  directorateFleetStrength,
   garrisons,
   groundDefenses,
   controllerOverrides,
@@ -442,6 +502,7 @@ export default function SystemPanel({
   onAssignFleet,
   onBuildShip,
   onCommitAttack,
+  onCommitDirectorateDefense,
   onCommitInvasion,
   onCommitOccupation,
   onSetTaxPolicy,
@@ -495,12 +556,15 @@ export default function SystemPanel({
             buildQueue={buildQueue}
             completedFocusIds={completedFocusIds}
             pendingCombat={pendingCombat}
+            pendingDirectorateCombat={pendingDirectorateCombat}
+            directorateFleetStrength={directorateFleetStrength}
             garrisonStrength={garrisons[system.id] ?? 0}
             groundDefenseStrength={groundDefenses[system.id] ?? 0}
             isHostile={isHostile}
             onAssignFleet={onAssignFleet}
             onBuildShip={onBuildShip}
             onCommitAttack={onCommitAttack}
+            onCommitDirectorateDefense={onCommitDirectorateDefense}
             onCommitInvasion={onCommitInvasion}
           />
         )}

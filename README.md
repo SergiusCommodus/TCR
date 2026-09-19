@@ -41,7 +41,7 @@ player has not made. Speeds other than paused are disabled until it is resolved.
 
 ## The screen
 
-A system map of local space with four nodes, colored by controller (Republic
+A system map of local space with six nodes, colored by controller (Republic
 blue, Directorate red, contested amber). Clicking a node opens its side panel.
 
 - **Status bar** shows the day, a progress bar through the current day, the
@@ -60,20 +60,43 @@ A node with a pending decision gets a marker, and a hint bar appears whenever
 that decision is off screen (wrong system selected, or the right system open on
 another tab) so a paused clock always has a visible cause.
 
+Six systems in total: Sol (the capital) and Anchorage (a forward naval
+station) started Republic; New Virginia started Directorate held, per the
+opening event; Shiloh started contested. Meridian, a Republic agricultural
+colony behind the lines, and Vicksburg, a former Confederate shipyard world
+overrun in the war's first week (Directorate held, `garrisonStrength` 5,
+`groundDefense` 4 — in line with New Virginia's and Shiloh's own baselines),
+round the map out to six, each with travel times to every other system in
+`src/game/travel.ts`.
+
 ## Events
 
 | Day | Event | Scope |
 | --- | --- | --- |
 | 0 | The Fall of New Virginia | New Virginia |
+| 2 | The Colonial Infrastructure Bill | national |
 | 4 | Refugee Transports at Earth Orbit | Sol |
+| 7 | Word from Occupied New Virginia | New Virginia |
 | 9 | Emergency Conscription Authority | national |
+| 12 | Fleet Fuel Reserves | national |
 | 15 | Directorate Industrial Estimates | Shiloh |
+| 18 | The Prisoners from Shiloh | Shiloh |
 | 22 | A Senator from the Frontier | national |
+| 25 | The Colonial Governors' Conference | national |
 | 28+ | Unconfirmed Fleet Movement | Shiloh |
+| 32+ | Allegations of War Profiteering | national |
 
-The last one is random: from day 28 it is checked once per day at
-`RANDOM_EVENT_CHANCE` (0.5), so in practice it lands within a day or two of
-becoming eligible. Lower that constant for a longer tail.
+The last two are random: each is checked once per day at
+`RANDOM_EVENT_CHANCE` (0.5) from its own `earliestDay` onward, so in practice
+each lands within a day or two of becoming eligible. Lower that constant for
+a longer tail. The six added this pass are spread through the gaps between
+the original five rather than clustered together, and vary in kind: The
+Colonial Infrastructure Bill is a purely domestic budget fight with nothing
+to do with the war; Word from Occupied New Virginia ties directly to the
+colony's fall, offering to fund its resistance movement; Fleet Fuel Reserves
+is a straightforward logistics dilemma; The Prisoners from Shiloh is a moral
+choice with no clearly best option (intelligence value against how it's
+obtained); the last two round out the political side.
 
 Two choices pay off later rather than immediately: emergency conscription
 returns materiel 6 days on, and deep reconnaissance returns leadership points
@@ -149,23 +172,61 @@ Directorate or contested, arrival does not complete. The clock pauses (the
 same as any decision event; every speed but Paused is disabled) and a Combat
 Orders panel opens in that system's Military tab, showing the attacking
 fleet's composition and strength side by side with the defending garrison's
-strength. A single Commit to Attack button, no stance options.
+strength, followed by a stance choice — see Combat stances below.
 
-On commit (`src/game/combat.ts`), both sides roll their strength with
-independent ±20% variance and whichever total is higher wins. Both sides take
-losses: the winner's loss fraction is proportional to how close the fight
-was (0 at a rout, up to 50% at a near-even fight), and the loser's is the
-complement of that (as low as 50%, up to a full wipe at a rout). Losses are
-split proportionally across a fleet's ship counts, rounded to whole ships. If
-the attacker wins, the fleet holds position at the system (composition
-reduced) and the garrison weakens; if the defender wins, the fleet's
-survivors — if any — retreat to the nearest other system by travel time, or
-the fleet is destroyed outright if the loss rounds it down to zero ships. A
-fleet mid-combat can't be reassigned (it still holds a destination, so the
-same guard that blocks reassigning an in-transit fleet already covers it).
+On commit (`src/game/combat.ts` and `src/game/stance.ts`), both sides roll
+their strength with variance and whichever total is higher wins. Both sides
+take losses: the winner's loss fraction is proportional to how close the
+fight was (0 at a rout, up to 50% at a near-even fight before any stance
+multiplier), and the loser's is the complement of that (as low as 50%, up to
+a full wipe at a rout). Losses are split proportionally across a fleet's ship
+counts, rounded to whole ships. If the attacker wins, the fleet holds
+position at the system (composition reduced) and the garrison weakens; if
+the defender wins, the fleet's survivors — if any — retreat to the nearest
+other system by travel time, or the fleet is destroyed outright if the loss
+rounds it down to zero ships (Defensive stance is the one exception — see
+below). A fleet mid-combat can't be reassigned (it still holds a
+destination, so the same guard that blocks reassigning an in-transit fleet
+already covers it).
 
 Winning a naval battle only clears the system's naval defense — it never
 changes who controls the system by itself. That takes a ground invasion.
+
+## Combat stances
+
+Three stances — Aggressive, Moderate, Defensive (`src/game/stance.ts`) —
+replace the old single Commit to Attack button with a real choice, applied
+identically wherever combat is about to resolve. Moderate reproduces the
+original combat formula exactly: no multiplier on strength, variance or
+casualties, the untouched baseline. Aggressive multiplies effective strength
+by 1.3 at the same ±20% variance, and both sides' casualties by 1.4 — a
+harder hit that costs more regardless of outcome. Defensive multiplies
+effective strength by 0.8, tightens variance to ±10%, and multiplies
+casualties by 0.6; a loss while Defensive never makes a last stand — it
+always retreats with partial losses instead of being destroyed outright
+(`guaranteeSurvivor` in `src/game/state.ts` keeps at least one ship alive to
+retreat with, even at a near total loss).
+
+Before committing, each stance shows an estimated win chance —
+`estimateWinChance` in `src/game/stance.ts`, the ratio of the stance
+holder's stance-modified effective strength to the total strength in play,
+rounded to a percentage. It's a displayed estimate to inform the choice, not
+a guaranteed outcome: `resolveStanceCombat` still rolls through
+`rollCombat`'s own variance to actually resolve it. `rollCombat` itself
+gained an optional `variance` parameter (default the original ±20%) purely
+so a stance can override it — ground invasion's own call is untouched and
+keeps the original band.
+
+The exact same stance panel is used in two places: committing to a naval
+attack on a Directorate or contested system, and defending a Republic system
+once a Directorate attack's countdown reaches zero — see Directorate AI
+below for how that pause is triggered. Whichever side the player is on, the
+stance always modifies *their own* strength; the opponent's is never
+touched. If no Republic fleet is present when a Directorate attack lands, it
+still resolves automatically against the baseline defense of 2 exactly as
+before — nothing to command, no stance choice shown. Whichever stance is
+chosen and its outcome are logged in the same narrated voice as every other
+combat line.
 
 ## Ground invasion and occupation
 
@@ -251,7 +312,7 @@ event are untouched.
 
 ## National Focus tree
 
-A sixth tab, Focus, carries a single linear path of seven National Focuses
+A sixth tab, Focus, carries a single linear path of eleven National Focuses
 (`src/game/focuses.ts`), each locked until the one before it completes. Only
 one can be underway at a time, and starting one deducts its `leadershipCost`
 immediately and begins a day based countdown using the exact same absolute
@@ -271,17 +332,31 @@ new live fields; the next startable focus is always the one at
 | 5 | Frontier Intelligence Network | 10 | 2 | Placeholder — narrative only for now |
 | 6 | Total War Footing | 16 | 3 | Permanent materiel and manpower increase, ongoing approval drain |
 | 7 | Reconstruction Directive | 12 | 2 | Placeholder hook for future occupation outcomes |
+| 8 | Emergency Requisition Powers | 14 | 3 | Larger permanent materiel increase than #1 alone, one time approval cost |
+| 9 | Unified War Production Board | 18 | 4 | Ship construction time cut further, stacking with #2 |
+| 10 | Total Mobilization Decree | 20 | 4 | Larger materiel and manpower increase than #6 alone, larger approval drain |
+| 11 | Continental Defense Initiative | 22 | 5 | Larger permanent leadership increase than #4 alone, one time approval boost |
+
+The last four escalate deliberately from the first seven: larger day and
+leadership costs, and effects that build on their earlier counterparts
+(`dailyModifier`s add, so completing both National Mobilization Act and
+Emergency Requisition Powers stacks their materiel bonuses) rather than
+replacing them — a nation further committed to total war, one step at a
+time.
 
 A completed focus's permanent effect is a `dailyModifier` layered onto
 `DAILY_UPKEEP` by `dailyUpkeepFor`, the exact same additive layering tax
 policy already uses — every completed focus with one just adds another term,
-so National Mobilization and Total War Footing's materiel bonuses stack.
-Colonial Shipyard Expansion instead carries a `buildTimeMultiplier` (0.85),
-read by `buildTimeMultiplierFor` wherever a ship's `buildDays` is consumed —
-both queuing a new build order and the Shipyard's advertised time per ship
-apply it, so the button always shows the build time you'll actually get.
-Refugee Resettlement and Emergency War Powers instead carry a one time
-`onComplete` effect, applied the moment the focus completes, the same
+so National Mobilization, Total War Footing, Emergency Requisition Powers
+and Total Mobilization Decree's materiel bonuses all stack together.
+Colonial Shipyard Expansion and Unified War Production Board instead each
+carry a `buildTimeMultiplier` (0.85 and 0.8), read by `buildTimeMultiplierFor`
+wherever a ship's `buildDays` is consumed and multiplied together — both
+queuing a new build order and the Shipyard's advertised time per ship apply
+it, so the button always shows the build time you'll actually get. Refugee
+Resettlement, Emergency War Powers, Emergency Requisition Powers and
+Continental Defense Initiative instead carry a one time `onComplete` effect,
+applied the moment the focus completes, the same
 `applyEffects`/`describeEffects` machinery every other effect in the game
 already goes through. Frontier Intelligence and Reconstruction Directive
 carry no numeric effect yet — completing them is still recorded in
@@ -329,23 +404,56 @@ reinforce the target for the rest of the window, exactly like any other
 fleet order.
 
 On arrival, `directorateFleetStrength` splits roughly 70% naval / 30% ground
-troops and rolls against whatever Republic fleet is stationed at the target
-system (summed across every fleet there) through the same `rollCombat`
-naval combat already uses; an undefended system falls back to a small
-baseline defense of 2. A Republic win destroys the Directorate's committed
-fleet outright and changes nothing else — no occupation follows a purely
-defensive win. A Directorate win resolves an occupation automatically, no
-player choice this time: `rollDirectorateOccupationOutcome` weights Bombard
-and Exterminate (split evenly), Enslave and Deport, and Occupy and Govern by
-brutality — at 0.7 that lands at roughly 55% / 30% / 15% — and applies the
-exact same population and approval effects `OCCUPATION_CHOICES` already
-defines for the player's own invasions, narrated from the Directorate's side
-rather than the Republic's. Only Occupy and Govern flips the system to
-Directorate control, the same asymmetry the player's own Occupy and Govern
-already has in reverse.
+troops. If a Republic fleet is stationed at the target system (summed across
+every fleet there), arrival pauses the clock and opens the same combat
+stance panel a player initiated attack uses — see Combat stances above —
+letting the player defend with Aggressive, Moderate or Defensive rather than
+the fight resolving on its own (`pendingDirectorateCombat`,
+`commitDirectorateDefense`). An undefended system has nothing to command, so
+it still resolves automatically at Moderate strength against a small
+baseline defense of 2, exactly as before. Either way the roll goes through
+the same `rollCombat`/`resolveStanceCombat` machinery naval combat always
+uses. A Republic win destroys the Directorate's committed fleet outright and
+changes nothing else — no occupation follows a purely defensive win. A
+Directorate win resolves an occupation automatically, no player choice this
+time: `rollDirectorateOccupationOutcome` weights Bombard and Exterminate
+(split evenly), Enslave and Deport, and Occupy and Govern by brutality — at
+0.7 that lands at roughly 55% / 30% / 15% — and applies the exact same
+population and approval effects `OCCUPATION_CHOICES` already defines for
+the player's own invasions, narrated from the Directorate's side rather
+than the Republic's. Only Occupy and Govern flips the system to Directorate
+control, the same asymmetry the player's own Occupy and Govern already has
+in reverse (`applyDirectorateOccupation` in `src/game/state.ts` is the
+single shared implementation both the automatic and player-resolved paths
+call, so they can never drift apart).
 
 Alert, arrival and outcome are all logged in the same narrated voice as
 everything else in the history panel.
+
+## Win and lose conditions
+
+Four conditions, checked continuously (`checkGameEnd` in
+`src/game/gameEnd.ts`, run after every single action by a wrapper around the
+reducer, so effectively every clock tick): Sol falling to anything but
+Republic control is an immediate, existential defeat, named as such;
+population reaching 0 is a defeat; approval sitting at or below 0 for more
+than 10 consecutive in game days is a defeat, tracked day boundary by day
+boundary in `runClock` via `GameSession.approvalCollapseStartDay` (cleared
+the moment approval reads above 0 again) and read against
+`APPROVAL_COLLAPSE_DAYS`; and every system on the map reading Republic
+controlled at once is a victory. The wrapper (`reducer` in `src/game/state.ts`,
+with the original switch statement renamed `reducerCore` underneath it) sets
+`GameSession.gameOver`, forces `speed: 0`, and appends a `Victory:`/`Defeat:`
+log line the moment any of these trips — and once `gameOver` is set, every
+action but `reset` is refused outright, so nothing else can ever process
+again: no further ticks, no events, no AI decisions.
+
+`EndScreen.tsx` replaces the entire main view the instant `gameOver` is set
+(`App.tsx` checks it before rendering anything else): which of Victory or
+Defeat, the exact narrated reason (naming Sol by name for that defeat,
+"fully repelled" for the win, the internal collapse framing for the other
+two), the final day count, and a Restart button wired to the same restart
+logic every other Restart button in the app already uses.
 
 ## Data model
 
@@ -361,11 +469,13 @@ everything else in the history panel.
 - `GameSession` wraps `GameState` with the clock (`speed`, `lastTickAt`), the
   pending event, a pending combat if a fleet has arrived at a hostile system
   and not yet been ordered to attack, a pending occupation if an invasion has
-  just succeeded, queued delayed effects, fleets, the build queue, current
-  garrison and ground defense strength per system, each system's live
-  controller override, the standing tax policy, and National Focus
-  progress (`completedFocusIds`, `activeFocus`), and the Directorate's own
-  fleet strength, next check day, in-flight attack and pending alert.
+  just succeeded, a pending Directorate defend stance choice, queued delayed
+  effects, fleets, the build queue, current garrison and ground defense
+  strength per system, each system's live controller override, the standing
+  tax policy, National Focus progress (`completedFocusIds`, `activeFocus`),
+  the Directorate's own fleet strength, next check day, in-flight attack and
+  pending alert, the approval collapse tracker (`approvalCollapseStartDay`),
+  and `gameOver` once a win or loss condition has triggered.
 
 `Effects` deliberately excludes `daysElapsed`: time comes from the clock, never
 from a choice's deltas.
@@ -377,7 +487,7 @@ old per turn drift was scaled to roughly a fifth to keep the same economic
 pressure; a run to day 30 lands within a few points of where the turn based
 version landed at its last scripted event.
 
-`src/game/systems.ts` holds the four systems plus an `EVENT_SCOPE` map from
+`src/game/systems.ts` holds the six systems plus an `EVENT_SCOPE` map from
 event id to system id or `'global'`, keeping event content free of layout
 concerns. An event id missing from that map falls back to `'global'`.
 
@@ -391,15 +501,22 @@ concerns. An event id missing from that map falls back to `'global'`.
 - `src/game/travel.ts` — the per-pair travel time table and lane list.
 - `src/game/ships.ts` — ship type data: cost, build time and strength per type.
 - `src/game/combat.ts` — the pure combat roll: strength, variance, losses.
-  Shared unchanged by naval combat and ground invasion.
+  Shared unchanged by naval combat and ground invasion; `variance` is now an
+  optional parameter (default the original ±20%) so a stance can override it.
+- `src/game/stance.ts` — the three combat stances, their modifiers,
+  `estimateWinChance` and `resolveStanceCombat`, wrapping `rollCombat`.
 - `src/game/occupation.ts` — the four occupation choices and the synthetic
   `EventDef` that lets DecisionCard render them.
-- `src/game/focuses.ts` — the seven National Focus definitions: name,
+- `src/game/focuses.ts` — the eleven National Focus definitions: name,
   description, days, leadership cost, narrated log lines, and effects.
 - `src/game/directorate.ts` — Directorate traits, fleet strength growth,
   the periodic attack decision and target weighting, and the automatic
   occupation outcome roll, re-narrated from OCCUPATION_CHOICES.
+- `src/game/gameEnd.ts` — `checkGameEnd`, the pure win/lose condition check
+  run after every action by the reducer wrapper in `state.ts`.
 - `src/components/` — `SystemMap`, `SystemPanel` (tabs, including the
-  Shipyard, Invade, Tax Policy and Focus tree controls), `SpeedControls`, `DecisionCard`
-  (shared by the Political tab and the national banner); the map also shows
-  an "incoming" marker on a system targeted by a Directorate attack.
+  Shipyard, Invade, Tax Policy, Focus tree and combat stance controls),
+  `SpeedControls`, `DecisionCard` (shared by the Political tab and the
+  national banner), `EndScreen` (replaces the whole view once `gameOver` is
+  set); the map also shows an "incoming" marker on a system targeted by a
+  Directorate attack.

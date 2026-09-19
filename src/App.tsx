@@ -1,5 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import DecisionCard from './components/DecisionCard';
+import EndScreen from './components/EndScreen';
 import SpeedControls from './components/SpeedControls';
 import SystemMap from './components/SystemMap';
 import SystemPanel from './components/SystemPanel';
@@ -8,6 +9,7 @@ import { NAVAL_INTELLIGENCE } from './game/directorate';
 import { findEvent } from './game/events';
 import { dayLabel, initialSession, reducer } from './game/state';
 import { HOME_SYSTEM_ID, SYSTEMS, scopeOf, systemById, systemName } from './game/systems';
+import type { CombatStance } from './game/stance';
 import type { Speed } from './game/types';
 
 /** How often the clock is settled against the wall clock. Elapsed real time is
@@ -34,7 +36,10 @@ export default function App() {
     completedFocusIds,
     activeFocus,
     directorateAttack,
+    directorateFleetStrength,
     pendingDirectorateAlert,
+    pendingDirectorateCombat,
+    gameOver,
   } = session;
 
   const pendingSystemId = pendingSystemOf(pendingEventId);
@@ -52,6 +57,11 @@ export default function App() {
   /** Combat Orders lives in the Military tab of the system under attack. */
   const combatVisible =
     pendingCombat !== null && pendingCombat.systemId === selectedId && tab === 'Military';
+  /** A Directorate defend stance decision lives in the same tab, same rule. */
+  const directorateCombatVisible =
+    pendingDirectorateCombat !== null &&
+    pendingDirectorateCombat.systemId === selectedId &&
+    tab === 'Military';
   /** The occupation decision lives in the Political tab, same as any other
    *  system scoped decision. */
   const occupationVisible =
@@ -98,6 +108,12 @@ export default function App() {
     setTab('Military');
   };
 
+  const openPendingDirectorateCombat = () => {
+    if (!pendingDirectorateCombat) return;
+    setSelectedId(pendingDirectorateCombat.systemId);
+    setTab('Military');
+  };
+
   const openPendingOccupation = () => {
     if (!pendingOccupation) return;
     setSelectedId(pendingOccupation.systemId);
@@ -109,6 +125,10 @@ export default function App() {
     setSelectedId(pendingSystemOf(initialSession().pendingEventId) ?? HOME_SYSTEM_ID);
     setTab('Political');
   };
+
+  if (gameOver) {
+    return <EndScreen gameOver={gameOver} onRestart={restart} />;
+  }
 
   return (
     <div className="app">
@@ -139,7 +159,8 @@ export default function App() {
               Boolean(pendingEventId) ||
               Boolean(pendingCombat) ||
               Boolean(pendingOccupation) ||
-              Boolean(pendingDirectorateAlert)
+              Boolean(pendingDirectorateAlert) ||
+              Boolean(pendingDirectorateCombat)
             }
             onChange={setSpeed}
           />
@@ -209,6 +230,13 @@ export default function App() {
         </button>
       )}
 
+      {pendingDirectorateCombat && !directorateCombatVisible && (
+        <button className="pending-hint" onClick={openPendingDirectorateCombat}>
+          Directorate attack at {systemName(pendingDirectorateCombat.systemId)} — open its Military
+          tab for combat orders
+        </button>
+      )}
+
       <main className="stage">
         <SystemMap
           daysElapsed={state.daysElapsed}
@@ -229,6 +257,10 @@ export default function App() {
           pendingEventId={pendingSystemId === selected.id ? pendingEventId : null}
           pendingCombat={pendingCombat?.systemId === selected.id ? pendingCombat : null}
           pendingOccupation={pendingOccupation?.systemId === selected.id ? pendingOccupation : null}
+          pendingDirectorateCombat={
+            pendingDirectorateCombat?.systemId === selected.id ? pendingDirectorateCombat : null
+          }
+          directorateFleetStrength={directorateFleetStrength}
           garrisons={session.garrisons}
           groundDefenses={session.groundDefenses}
           controllerOverrides={session.controllerOverrides}
@@ -245,7 +277,10 @@ export default function App() {
             dispatch({ type: 'assignFleet', fleetId, destinationId })
           }
           onBuildShip={(systemId, shipType) => dispatch({ type: 'buildShip', systemId, shipType })}
-          onCommitAttack={() => dispatch({ type: 'commitAttack' })}
+          onCommitAttack={(stance: CombatStance) => dispatch({ type: 'commitAttack', stance })}
+          onCommitDirectorateDefense={(stance: CombatStance) =>
+            dispatch({ type: 'commitDirectorateDefense', stance })
+          }
           onCommitInvasion={(fleetId) => dispatch({ type: 'commitInvasion', fleetId })}
           onCommitOccupation={(choiceIndex) => dispatch({ type: 'commitOccupation', choiceIndex })}
           onSetTaxPolicy={(policy) => dispatch({ type: 'setTaxPolicy', policy })}
@@ -264,11 +299,15 @@ export default function App() {
           <button className="secondary" onClick={restart}>
             Restart
           </button>
-          {(pendingEventId || pendingCombat || pendingOccupation) && (
+          {(pendingEventId || pendingCombat || pendingOccupation || pendingDirectorateCombat) && (
             <p className="quiet">
               Clock paused. Resolve the pending{' '}
-              {pendingEventId ? 'decision' : pendingCombat ? 'combat' : 'occupation decision'} to
-              resume.
+              {pendingEventId
+                ? 'decision'
+                : pendingCombat || pendingDirectorateCombat
+                  ? 'combat'
+                  : 'occupation decision'}{' '}
+              to resume.
             </p>
           )}
         </div>

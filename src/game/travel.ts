@@ -20,6 +20,15 @@ const TRAVEL_PAIRS: [string, string, number][] = [
   ['new-virginia', 'shiloh', 7],
   ['anchorage', 'new-virginia', 9],
   ['anchorage', 'shiloh', 10],
+  ['meridian', 'sol', 4],
+  ['meridian', 'new-virginia', 10],
+  ['meridian', 'anchorage', 6],
+  ['meridian', 'shiloh', 8],
+  ['meridian', 'vicksburg', 11],
+  ['vicksburg', 'sol', 7],
+  ['vicksburg', 'new-virginia', 4],
+  ['vicksburg', 'anchorage', 10],
+  ['vicksburg', 'shiloh', 6],
 ];
 
 const TRAVEL_TABLE: Record<string, number> = Object.fromEntries(

@@ -67,6 +67,24 @@ export const SYSTEMS: SystemDef[] = [
     garrisonStrength: 4,
     groundDefense: 3,
   },
+  {
+    id: 'meridian',
+    name: 'Meridian',
+    controller: 'republic',
+    note: "Republic agricultural belt, feeding fleets and cities alike since before the war. Distance from the front is its only real defense.",
+    x: 14,
+    y: 78,
+  },
+  {
+    id: 'vicksburg',
+    name: 'Vicksburg',
+    controller: 'directorate',
+    note: "Former Confederate shipyard world, overrun in the war's first week. Directorate colors already fly over what's left of its orbital works.",
+    x: 90,
+    y: 55,
+    garrisonStrength: 5,
+    groundDefense: 4,
+  },
 ];
 
 export const HOME_SYSTEM_ID = 'sol';
@@ -85,6 +103,12 @@ const EVENT_SCOPE: Record<string, string> = {
   'directorate-industry': 'shiloh',
   'frontier-senator': 'global',
   'frontier-fleet-movement': 'shiloh',
+  'colonial-infrastructure-bill': 'global',
+  'new-virginia-resistance': 'new-virginia',
+  'fleet-fuel-reserves': 'global',
+  'shiloh-prisoners': 'shiloh',
+  'colonial-governors-conference': 'global',
+  'war-profiteering-allegations': 'global',
 };
 
 export function scopeOf(eventId: string): string {

@@ -16,6 +16,7 @@ import {
 } from './directorate';
 import { EVENTS, findEvent } from './events';
 import { FOCUS_PATH } from './focuses';
+import { checkGameEnd } from './gameEnd';
 import { OCCUPATION_CHOICES } from './occupation';
 import {
   applyCompositionLosses,
@@ -25,18 +26,23 @@ import {
   nextFleetName,
 } from './fleets';
 import { SHIP_TYPES } from './ships';
+import { STANCE_LABEL, resolveStanceCombat } from './stance';
 import { HOME_SYSTEM_ID, SYSTEMS, currentController, systemById, systemName } from './systems';
 import { nearestOtherSystem, travelDays } from './travel';
+import type { CombatStance } from './stance';
+import type { ShipComposition } from './types';
 import type {
   ActiveFocus,
   BuildOrder,
   Effects,
   EventDef,
   Fleet,
+  GameEndState,
   GameSession,
   GameState,
   PendingCombat,
   PendingDirectorateAlert,
+  PendingDirectorateCombat,
   QueuedEffects,
   ShipType,
   Speed,
@@ -245,6 +251,9 @@ export function initialSession(): GameSession {
     directorateNextCheckDay: rollDirectorateCheckInterval(),
     directorateAttack: null,
     pendingDirectorateAlert: null,
+    pendingDirectorateCombat: null,
+    approvalCollapseStartDay: null,
+    gameOver: null,
   };
 }
 
@@ -262,6 +271,50 @@ function pickEventForDay(day: number, firedEventIds: string[]): EventDef | undef
 }
 
 /**
+ * Applies a won Directorate attack's automatic occupation to the national
+ * totals and, on Occupy and Govern, the target's controller — shared by the
+ * undefended auto-resolve path in runClock and the player-facing defend
+ * stance resolution in commitDirectorateDefense, so the two can never drift
+ * apart on what a Directorate win actually does.
+ */
+function applyDirectorateOccupation(
+  resources: GameState,
+  controllerOverrides: GameSession['controllerOverrides'],
+  systemId: string,
+  logDay: number,
+): {
+  resources: GameState;
+  controllerOverrides: GameSession['controllerOverrides'];
+  logLines: string[];
+} {
+  const targetName = systemName(systemId);
+  const outcomeChoice = rollDirectorateOccupationOutcome(DIRECTORATE_TRAITS.brutality);
+  const nextResources = applyEffects(resources, outcomeChoice.effects);
+  const nextControllerOverrides = outcomeChoice.flipsControl
+    ? { ...controllerOverrides, [systemId]: 'directorate' as const }
+    : controllerOverrides;
+  const logLines = [
+    `Day ${dayLabel(logDay)} — ${outcomeChoice.label}: ${outcomeChoice.resultText(targetName)} ` +
+      `(${describeEffects(outcomeChoice.effects)})`,
+  ];
+  return { resources: nextResources, controllerOverrides: nextControllerOverrides, logLines };
+}
+
+/** Defensive stance never lets a loss wipe the fleet outright — if every
+ *  ship type would otherwise round to zero, one ship of whichever type the
+ *  original composition had the most of survives to retreat. */
+function guaranteeSurvivor(
+  composition: ShipComposition,
+  original: ShipComposition,
+): ShipComposition {
+  if (fleetStrength(composition) > 0) return composition;
+  const types = Object.keys(original) as ShipType[];
+  const largest = types.reduce((best, t) => (original[t] > original[best] ? t : best), types[0]);
+  if (original[largest] <= 0) return composition;
+  return { ...composition, [largest]: 1 };
+}
+
+/**
  * Advances the clock by `realMs` of wall time at the session's current speed.
  *
  * Whole days are walked one at a time so that daily upkeep, delayed effects,
@@ -274,6 +327,7 @@ export function runClock(session: GameSession, realMs: number): GameSession {
     session.pendingEventId ||
     session.pendingCombat ||
     session.pendingOccupation ||
+    session.pendingDirectorateCombat ||
     session.speed === 0 ||
     realMs <= 0
   ) {
@@ -295,10 +349,12 @@ export function runClock(session: GameSession, realMs: number): GameSession {
   let directorateFleetStrength = session.directorateFleetStrength;
   let directorateNextCheckDay = session.directorateNextCheckDay;
   let directorateAttack = session.directorateAttack;
+  let approvalCollapseStartDay = session.approvalCollapseStartDay;
   let days = session.state.daysElapsed;
   let pendingEventId: string | null = null;
   let pendingCombat: PendingCombat | null = null;
   let pendingDirectorateAlert: PendingDirectorateAlert | null = null;
+  let pendingDirectorateCombat: PendingDirectorateCombat | null = null;
   let speed: Speed = session.speed;
 
   /** Applies everything scheduled at or before `atDay`. */
@@ -422,64 +478,58 @@ export function runClock(session: GameSession, realMs: number): GameSession {
 
     if (directorateAttack && directorateAttack.arrivalDay <= atDay) {
       const attack = directorateAttack;
-      directorateAttack = null;
-
       const targetName = systemName(attack.systemId);
       const rawDefense = defendingStrengthAt(attack.systemId, fleets);
-      const defenderStrength = rawDefense > 0 ? rawDefense : DIRECTORATE_BASELINE_DEFENSE;
-      const navalStrength = directorateFleetStrength * DIRECTORATE_NAVAL_SHARE;
-      const groundTroops = directorateFleetStrength * (1 - DIRECTORATE_NAVAL_SHARE);
-      const outcome = rollCombat(navalStrength, defenderStrength);
 
-      log.push(
-        `Day ${dayLabel(attack.arrivalDay)} — ${NAVAL_INTELLIGENCE}: the Directorate fleet reaches ` +
-          `${targetName} (${Math.round(navalStrength)} strength, an estimated ` +
-          `${Math.round(groundTroops)} ground troops aboard) and engages ` +
-          `${rawDefense > 0 ? 'the defending fleet' : `${targetName}'s minimal garrison`} ` +
-          `(${Math.round(defenderStrength)} strength). ` +
-          `${outcome.attackerWins ? 'The Directorate fleet breaks through.' : 'The Republic defense holds.'}`,
-      );
-
-      // Defenders take proportional losses either way, same as any other
-      // naval engagement — win or lose, a fight this size leaves marks.
       if (rawDefense > 0) {
-        fleets = fleets.flatMap((fleet) => {
-          if (fleet.location !== attack.systemId) return [fleet];
-          const survivors = applyCompositionLosses(fleet.composition, outcome.defenderLossFraction);
-          if (fleetStrength(survivors) <= 0) {
-            log.push(
-              `Day ${dayLabel(attack.arrivalDay)} — ${fleet.name} is destroyed defending ${targetName}.`,
-            );
-            return [];
-          }
-          return [{ ...fleet, composition: survivors }];
-        });
-      }
-
-      if (outcome.attackerWins) {
-        // Even a winning attacker takes proportional losses, same as the
-        // player's own commitAttack; the survivors are what remains of the
-        // Directorate's standing force going forward.
-        directorateFleetStrength = applySurvivingShare(
-          directorateFleetStrength,
-          outcome.attackerLossFraction,
-        );
-        const outcomeChoice = rollDirectorateOccupationOutcome(DIRECTORATE_TRAITS.brutality);
-        resources = applyEffects(resources, outcomeChoice.effects);
+        // A Republic fleet is present: the player chooses a defend stance
+        // (commitDirectorateDefense) instead of this resolving automatically.
+        directorateAttack = null;
+        pendingDirectorateCombat = { systemId: attack.systemId };
         log.push(
-          `Day ${dayLabel(attack.arrivalDay)} — ${outcomeChoice.label}: ` +
-            `${outcomeChoice.resultText(targetName)} (${describeEffects(outcomeChoice.effects)})`,
+          `Day ${dayLabel(attack.arrivalDay)} — ${NAVAL_INTELLIGENCE}: the Directorate fleet ` +
+            `reaches ${targetName} and closes on the defending fleet. Awaiting combat orders.`,
         );
-        if (outcomeChoice.flipsControl) {
-          controllerOverrides = { ...controllerOverrides, [attack.systemId]: 'directorate' };
-        }
       } else {
-        // A defensive win costs the Directorate its committed fleet outright
-        // — nothing else about the system changes.
-        directorateFleetStrength = 0;
+        directorateAttack = null;
+        const defenderStrength = DIRECTORATE_BASELINE_DEFENSE;
+        const navalStrength = directorateFleetStrength * DIRECTORATE_NAVAL_SHARE;
+        const groundTroops = directorateFleetStrength * (1 - DIRECTORATE_NAVAL_SHARE);
+        const outcome = rollCombat(navalStrength, defenderStrength);
+
         log.push(
-          `Day ${dayLabel(attack.arrivalDay)} — The Directorate fleet is destroyed at ${targetName}.`,
+          `Day ${dayLabel(attack.arrivalDay)} — ${NAVAL_INTELLIGENCE}: the Directorate fleet ` +
+            `reaches ${targetName} (${Math.round(navalStrength)} strength, an estimated ` +
+            `${Math.round(groundTroops)} ground troops aboard) and engages ${targetName}'s ` +
+            `minimal garrison (${Math.round(defenderStrength)} strength). ` +
+            `${outcome.attackerWins ? 'The Directorate fleet breaks through.' : 'The Republic defense holds.'}`,
         );
+
+        if (outcome.attackerWins) {
+          // Even a winning attacker takes proportional losses, same as the
+          // player's own commitAttack; the survivors are what remains of the
+          // Directorate's standing force going forward.
+          directorateFleetStrength = applySurvivingShare(
+            directorateFleetStrength,
+            outcome.attackerLossFraction,
+          );
+          const result = applyDirectorateOccupation(
+            resources,
+            controllerOverrides,
+            attack.systemId,
+            attack.arrivalDay,
+          );
+          resources = result.resources;
+          controllerOverrides = result.controllerOverrides;
+          log.push(...result.logLines);
+        } else {
+          // A defensive win costs the Directorate its committed fleet
+          // outright — nothing else about the system changes.
+          directorateFleetStrength = 0;
+          log.push(
+            `Day ${dayLabel(attack.arrivalDay)} — The Directorate fleet is destroyed at ${targetName}.`,
+          );
+        }
       }
     }
   };
@@ -496,7 +546,15 @@ export function runClock(session: GameSession, realMs: number): GameSession {
     log.push(`Day ${boundary} — The war effort grinds on (${describeEffects(upkeep)}).`);
     settleDueWork(boundary);
 
-    if (pendingCombat) {
+    // Tracked at whole day precision, the same granularity as everything
+    // else settled per boundary — see APPROVAL_COLLAPSE_DAYS in gameEnd.ts.
+    if (resources.approval <= 0) {
+      if (approvalCollapseStartDay === null) approvalCollapseStartDay = boundary;
+    } else {
+      approvalCollapseStartDay = null;
+    }
+
+    if (pendingCombat || pendingDirectorateCombat) {
       speed = 0;
       break;
     }
@@ -536,10 +594,10 @@ export function runClock(session: GameSession, realMs: number): GameSession {
     }
   }
 
-  if (!pendingEventId && !pendingCombat && !pendingDirectorateAlert) {
+  if (!pendingEventId && !pendingCombat && !pendingDirectorateAlert && !pendingDirectorateCombat) {
     days = target;
     settleDueWork(days);
-    if (pendingCombat) speed = 0;
+    if (pendingCombat || pendingDirectorateCombat) speed = 0;
   }
 
   return {
@@ -560,6 +618,8 @@ export function runClock(session: GameSession, realMs: number): GameSession {
     directorateNextCheckDay,
     directorateAttack,
     pendingDirectorateAlert,
+    pendingDirectorateCombat,
+    approvalCollapseStartDay,
   };
 }
 
@@ -567,7 +627,8 @@ export type GameAction =
   | { type: 'choose'; choiceIndex: number }
   | { type: 'assignFleet'; fleetId: string; destinationId: string }
   | { type: 'buildShip'; systemId: string; shipType: ShipType }
-  | { type: 'commitAttack' }
+  | { type: 'commitAttack'; stance: CombatStance }
+  | { type: 'commitDirectorateDefense'; stance: CombatStance }
   | { type: 'commitInvasion'; fleetId: string }
   | { type: 'commitOccupation'; choiceIndex: number }
   | { type: 'setTaxPolicy'; policy: TaxPolicy }
@@ -577,7 +638,7 @@ export type GameAction =
   | { type: 'tick'; now: number }
   | { type: 'reset' };
 
-export function reducer(session: GameSession, action: GameAction): GameSession {
+function reducerCore(session: GameSession, action: GameAction): GameSession {
   switch (action.type) {
     case 'tick': {
       if (session.lastTickAt === null) return { ...session, lastTickAt: action.now };
@@ -596,7 +657,8 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
           settled.pendingEventId ||
           settled.pendingCombat ||
           settled.pendingOccupation ||
-          settled.pendingDirectorateAlert
+          settled.pendingDirectorateAlert ||
+          settled.pendingDirectorateCombat
             ? 0
             : action.speed,
         lastTickAt: action.now,
@@ -714,10 +776,9 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
       const days = session.state.daysElapsed;
       const attackerStrength = fleetStrength(fleet.composition);
       const defenderStrength = session.garrisons[pending.systemId] ?? 0;
-      const outcome = rollCombat(attackerStrength, defenderStrength);
+      const outcome = resolveStanceCombat(attackerStrength, defenderStrength, action.stance);
 
-      const survivors = applyCompositionLosses(fleet.composition, outcome.attackerLossFraction);
-      const survivingStrength = fleetStrength(survivors);
+      let survivors = applyCompositionLosses(fleet.composition, outcome.attackerLossFraction);
       const garrisonAfter = Math.max(
         0,
         Math.round(defenderStrength * (1 - outcome.defenderLossFraction)),
@@ -732,9 +793,15 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
         ...session.state.log,
         `Day ${dayLabel(days)} — Battle of ${systemName(pending.systemId)}: ${fleet.name} ` +
           `(${Math.round(attackerStrength)} strength) engages the garrison ` +
-          `(${Math.round(defenderStrength)} strength). ` +
+          `(${Math.round(defenderStrength)} strength) under a ${STANCE_LABEL[action.stance]} stance. ` +
           `${outcome.attackerWins ? `${fleet.name} prevails.` : 'The garrison holds.'}`,
       ];
+
+      // Defensive stance never makes a last stand: a loss always retreats
+      // with partial losses rather than being destroyed outright.
+      const defensiveLossRetreat = action.stance === 'defensive' && !outcome.attackerWins;
+      if (defensiveLossRetreat) survivors = guaranteeSurvivor(survivors, fleet.composition);
+      const survivingStrength = fleetStrength(survivors);
 
       let fleets: Fleet[];
       if (survivingStrength <= 0) {
@@ -801,11 +868,111 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
       };
     }
 
+    case 'commitDirectorateDefense': {
+      const pending = session.pendingDirectorateCombat;
+      if (!pending) return session;
+
+      const days = session.state.daysElapsed;
+      const targetName = systemName(pending.systemId);
+      const defendingFleets = session.fleets.filter((f) => f.location === pending.systemId);
+      const defenderStrength = defendingFleets.reduce(
+        (sum, f) => sum + fleetStrength(f.composition),
+        0,
+      );
+      const navalStrength = session.directorateFleetStrength * DIRECTORATE_NAVAL_SHARE;
+      const groundTroops = session.directorateFleetStrength * (1 - DIRECTORATE_NAVAL_SHARE);
+
+      // The defending Republic fleet is the stance holder here — the
+      // Directorate's naval strength is the unmodified opponent, same
+      // formula and variance as any other engagement.
+      const outcome = resolveStanceCombat(defenderStrength, navalStrength, action.stance);
+      const republicWins = outcome.attackerWins;
+      const republicLossFraction = outcome.attackerLossFraction;
+      const directorateLossFraction = outcome.defenderLossFraction;
+
+      const log = [
+        ...session.state.log,
+        `Day ${dayLabel(days)} — ${NAVAL_INTELLIGENCE}: the Directorate fleet reaches ${targetName} ` +
+          `(${Math.round(navalStrength)} strength, an estimated ${Math.round(groundTroops)} ` +
+          `ground troops aboard) and engages the defending fleet (${Math.round(defenderStrength)} ` +
+          `strength) under a ${STANCE_LABEL[action.stance]} stance. ` +
+          `${republicWins ? 'The Republic defense holds.' : 'The Directorate fleet breaks through.'}`,
+      ];
+
+      let fleets = session.fleets;
+      if (action.stance === 'defensive' && !republicWins) {
+        // Defensive: preserve the fleet by retreating rather than making a
+        // last stand — the same retreat behavior a losing attacker uses.
+        const fallback = nearestOtherSystem(pending.systemId);
+        const eta = travelDays(pending.systemId, fallback);
+        fleets = session.fleets.map((f) => {
+          if (f.location !== pending.systemId) return f;
+          const survivors = guaranteeSurvivor(
+            applyCompositionLosses(f.composition, republicLossFraction),
+            f.composition,
+          );
+          return {
+            ...f,
+            location: null,
+            origin: pending.systemId,
+            destination: fallback,
+            departureDay: days,
+            arrivalDay: days + eta,
+            composition: survivors,
+          };
+        });
+        log.push(
+          `Day ${dayLabel(days)} — the defending fleet withdraws from ${targetName} toward ` +
+            `${systemName(fallback)} rather than make a last stand; ETA ${eta} days.`,
+        );
+      } else if (defendingFleets.length > 0) {
+        fleets = session.fleets.flatMap((f) => {
+          if (f.location !== pending.systemId) return [f];
+          const survivors = applyCompositionLosses(f.composition, republicLossFraction);
+          if (fleetStrength(survivors) <= 0) {
+            log.push(`Day ${dayLabel(days)} — ${f.name} is destroyed defending ${targetName}.`);
+            return [];
+          }
+          return [{ ...f, composition: survivors }];
+        });
+      }
+
+      let directorateFleetStrength = session.directorateFleetStrength;
+      let controllerOverrides = session.controllerOverrides;
+      let resources = session.state;
+
+      if (!republicWins) {
+        directorateFleetStrength = applySurvivingShare(directorateFleetStrength, directorateLossFraction);
+        const result = applyDirectorateOccupation(resources, controllerOverrides, pending.systemId, days);
+        resources = result.resources;
+        controllerOverrides = result.controllerOverrides;
+        log.push(...result.logLines);
+      } else {
+        directorateFleetStrength = 0;
+        log.push(`Day ${dayLabel(days)} — The Directorate fleet is destroyed at ${targetName}.`);
+      }
+
+      return {
+        ...session,
+        state: { ...resources, log },
+        fleets,
+        directorateFleetStrength,
+        controllerOverrides,
+        pendingDirectorateCombat: null,
+      };
+    }
+
     case 'commitInvasion': {
       // Only one thing is ever allowed to pause the game at a time; refusing
       // here keeps that invariant even though nothing else currently calls
       // this action while another is pending.
-      if (session.pendingEventId || session.pendingCombat || session.pendingOccupation) {
+      if (
+        session.pendingEventId ||
+        session.pendingCombat ||
+        session.pendingOccupation ||
+        session.pendingDirectorateAlert ||
+        session.pendingDirectorateCombat
+      ) {
         return session;
       }
 
@@ -920,10 +1087,19 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
 
     case 'acknowledgeDirectorateAlert': {
       if (!session.pendingDirectorateAlert) return session;
+      // A scripted event (or any other pending state) can land on the exact
+      // same day boundary as the alert; acknowledging the alert must not
+      // resume the clock out from under a decision still waiting on the
+      // player, so it only restores the prior speed when nothing else is.
+      const stillPaused =
+        session.pendingEventId ||
+        session.pendingCombat ||
+        session.pendingOccupation ||
+        session.pendingDirectorateCombat;
       return {
         ...session,
         pendingDirectorateAlert: null,
-        speed: session.pendingDirectorateAlert.resumeSpeed,
+        speed: stillPaused ? 0 : session.pendingDirectorateAlert.resumeSpeed,
         lastTickAt: action.now,
       };
     }
@@ -934,4 +1110,36 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
     default:
       return session;
   }
+}
+
+function endLogLine(end: GameEndState): string {
+  const label = end.result === 'victory' ? 'Victory' : 'Defeat';
+  return `Day ${end.day} — ${label}: ${end.reason}`;
+}
+
+/** Checked after every action — see checkGameEnd in gameEnd.ts. A no-op once
+ *  the game is already over: the reducer wrapper below refuses every action
+ *  but 'reset' before this could ever run again. */
+function applyGameEnd(session: GameSession): GameSession {
+  if (session.gameOver) return session;
+  const end = checkGameEnd(session);
+  if (!end) return session;
+  return {
+    ...session,
+    gameOver: end,
+    speed: 0,
+    state: { ...session.state, log: [...session.state.log, endLogLine(end)] },
+  };
+}
+
+/**
+ * The public reducer: runs every action through reducerCore, then checks
+ * win and lose conditions on the result, effectively continuously since
+ * every dispatch (including the 100ms clock tick) passes through here.
+ * Once gameOver is set, every action but 'reset' is a no-op — the clock is
+ * paused immediately and permanently, and nothing else can process.
+ */
+export function reducer(session: GameSession, action: GameAction): GameSession {
+  if (session.gameOver && action.type !== 'reset') return session;
+  return applyGameEnd(reducerCore(session, action));
 }

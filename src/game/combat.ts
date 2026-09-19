@@ -27,13 +27,16 @@ export interface CombatOutcome {
  * Resolves one engagement between an attacking fleet and a defending
  * garrison, given their pre-roll strengths. `rng` defaults to Math.random
  * and is overridable so the formula can be tested deterministically.
+ * `variance` defaults to the standard ±20% band and is overridable so a
+ * combat stance can tighten or widen it without touching this formula.
  */
 export function rollCombat(
   attackerStrength: number,
   defenderStrength: number,
   rng: () => number = Math.random,
+  variance: number = COMBAT_VARIANCE,
 ): CombatOutcome {
-  const varied = (base: number) => base * (1 + (rng() * 2 - 1) * COMBAT_VARIANCE);
+  const varied = (base: number) => base * (1 + (rng() * 2 - 1) * variance);
   const attackerRoll = varied(attackerStrength);
   const defenderRoll = varied(defenderStrength);
   const attackerWins = attackerRoll >= defenderRoll;

@@ -128,6 +128,24 @@ export interface PendingDirectorateAlert {
   resumeSpeed: Speed;
 }
 
+/** A Directorate attack that has arrived at a system where a Republic fleet
+ *  is present: paused, awaiting the player's defend stance choice instead of
+ *  resolving automatically. */
+export interface PendingDirectorateCombat {
+  systemId: string;
+}
+
+/** Victory or defeat, decided once and permanent: 'result' and 'reason'
+ *  drive the end screen and the closing log line, 'day' is the whole day
+ *  count the game ended on. */
+export type GameResult = 'victory' | 'defeat';
+
+export interface GameEndState {
+  result: GameResult;
+  reason: string;
+  day: number;
+}
+
 /** 0 is paused; 1 through 5 are the in game days per real minute. */
 export type Speed = 0 | 1 | 2 | 3 | 4 | 5;
 
@@ -185,4 +203,14 @@ export interface GameSession {
   /** The just-fired intelligence alert, shown once and cleared automatically
    *  a few seconds later — see PendingDirectorateAlert. */
   pendingDirectorateAlert: PendingDirectorateAlert | null;
+  /** A Directorate attack that has arrived where a Republic fleet is
+   *  present, awaiting the player's defend stance choice. */
+  pendingDirectorateCombat: PendingDirectorateCombat | null;
+  /** The absolute day approval first read at or below zero, cleared the
+   *  moment it rises back above zero. Null while approval is healthy. Used
+   *  to judge internal collapse: see APPROVAL_COLLAPSE_DAYS in gameEnd.ts. */
+  approvalCollapseStartDay: number | null;
+  /** Set once, permanently, the moment a win or loss condition triggers.
+   *  Every action but 'reset' is then a no-op — see the reducer wrapper. */
+  gameOver: GameEndState | null;
 }
