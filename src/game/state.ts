@@ -46,6 +46,7 @@ import type {
   PendingCombat,
   PendingDirectorateAlert,
   PendingDirectorateCombat,
+  PendingPanelItem,
   QueuedEffects,
   ShipType,
   Speed,
@@ -242,6 +243,7 @@ export function initialSession(): GameSession {
     firedEventIds: opening ? [opening.id] : [],
     pendingCombat: null,
     pendingOccupation: null,
+    queuedPanels: [],
     queued: [],
     fleets: INITIAL_FLEETS,
     buildQueue: [],
@@ -321,25 +323,62 @@ function guaranteeSurvivor(
   return { ...composition, [largest]: 1 };
 }
 
+/** The four active-slot fields, all cleared, with an empty queue — the
+ *  starting point promoteNextPanel builds its result from. */
+const NO_ACTIVE_PANEL = {
+  pendingEventId: null as string | null,
+  pendingDirectorateAlert: null as PendingDirectorateAlert | null,
+  pendingCombat: null as PendingCombat | null,
+  pendingDirectorateCombat: null as PendingDirectorateCombat | null,
+  queuedPanels: [] as PendingPanelItem[],
+};
+
+/**
+ * Pops the front of queuedPanels, if any, and promotes it into the matching
+ * active-slot field — used by every reducer case that resolves whichever
+ * panel is currently active, in place of just nulling that field out, so the
+ * next queued panel (if one is waiting) opens automatically.
+ */
+function promoteNextPanel(queuedPanels: PendingPanelItem[]): typeof NO_ACTIVE_PANEL {
+  const [next, ...rest] = queuedPanels;
+  if (!next) return NO_ACTIVE_PANEL;
+  switch (next.kind) {
+    case 'event':
+      return { ...NO_ACTIVE_PANEL, pendingEventId: next.eventId, queuedPanels: rest };
+    case 'directorateAlert':
+      return {
+        ...NO_ACTIVE_PANEL,
+        pendingDirectorateAlert: { systemId: next.systemId },
+        queuedPanels: rest,
+      };
+    case 'combat':
+      return {
+        ...NO_ACTIVE_PANEL,
+        pendingCombat: { fleetId: next.fleetId, systemId: next.systemId },
+        queuedPanels: rest,
+      };
+    case 'directorateCombat':
+      return {
+        ...NO_ACTIVE_PANEL,
+        pendingDirectorateCombat: { systemId: next.systemId },
+        queuedPanels: rest,
+      };
+  }
+}
+
 /**
  * Advances the clock by `realMs` of wall time at the session's current speed.
  *
  * Whole days are walked one at a time so that daily upkeep, delayed effects,
- * fleet arrivals and event thresholds all land in order. A political or
- * narrative decision event only drops the speed to 1x (if it was higher) the
- * moment it fires — the walk keeps going, unlike combat arriving or an
- * occupation decision, which still stop it outright. Only one such decision
- * event is ever pending at a time; the walk skips picking a new one for as
- * long as one is still unresolved.
+ * fleet arrivals and event thresholds all land in order. None of a decision
+ * event, a Directorate intelligence alert, or combat arriving (attacking or
+ * defending) pause the clock or touch its speed anymore — the walk keeps
+ * going regardless of how many of them are open or queued. Only an
+ * occupation decision, which settles a fight that already happened rather
+ * than something still unfolding, still stops the walk outright.
  */
 export function runClock(session: GameSession, realMs: number): GameSession {
-  if (
-    session.pendingCombat ||
-    session.pendingOccupation ||
-    session.pendingDirectorateCombat ||
-    session.speed === 0 ||
-    realMs <= 0
-  ) {
+  if (session.pendingOccupation || session.speed === 0 || realMs <= 0) {
     return session;
   }
 
@@ -362,14 +401,54 @@ export function runClock(session: GameSession, realMs: number): GameSession {
   let directorateAttack = session.directorateAttack;
   let approvalCollapseStartDay = session.approvalCollapseStartDay;
   let days = session.state.daysElapsed;
-  // Carried forward, not reset: a decision event no longer stops the walk
-  // outright, so a still-unresolved one must survive this call rather than
-  // being dropped the moment the clock ticks again.
+  // Carried forward, not reset: none of these stop the walk anymore, so
+  // whatever was already active or queued must survive this call rather
+  // than being dropped the moment the clock ticks again.
   let pendingEventId: string | null = session.pendingEventId;
-  let pendingCombat: PendingCombat | null = null;
-  let pendingDirectorateAlert: PendingDirectorateAlert | null = null;
-  let pendingDirectorateCombat: PendingDirectorateCombat | null = null;
-  let speed: Speed = session.speed;
+  let pendingCombat: PendingCombat | null = session.pendingCombat;
+  let pendingDirectorateAlert: PendingDirectorateAlert | null = session.pendingDirectorateAlert;
+  let pendingDirectorateCombat: PendingDirectorateCombat | null = session.pendingDirectorateCombat;
+  let queuedPanels: PendingPanelItem[] = session.queuedPanels;
+
+  /** True while any of the four active-slot panels is already open. */
+  const isPanelActive = () =>
+    Boolean(
+      pendingEventId || pendingCombat || pendingDirectorateAlert || pendingDirectorateCombat,
+    );
+
+  /** Activates `item` into its matching slot if nothing is active yet,
+   *  otherwise appends it to the queue behind whatever is. */
+  const enqueueOrActivate = (item: PendingPanelItem) => {
+    if (isPanelActive()) {
+      queuedPanels = [...queuedPanels, item];
+      return;
+    }
+    switch (item.kind) {
+      case 'event':
+        pendingEventId = item.eventId;
+        break;
+      case 'directorateAlert':
+        pendingDirectorateAlert = { systemId: item.systemId };
+        break;
+      case 'combat':
+        pendingCombat = { fleetId: item.fleetId, systemId: item.systemId };
+        break;
+      case 'directorateCombat':
+        pendingDirectorateCombat = { systemId: item.systemId };
+        break;
+    }
+  };
+
+  // Fleets already known to have a pending (active or queued) combat panel —
+  // checked before opening a new one so a fleet left "arrived, awaiting
+  // orders" isn't re-detected and re-logged on every later day boundary now
+  // that arrival no longer hard-stops the walk.
+  const combatPendingFleetIds = new Set<string>([
+    ...(session.pendingCombat ? [session.pendingCombat.fleetId] : []),
+    ...session.queuedPanels
+      .filter((p): p is Extract<PendingPanelItem, { kind: 'combat' }> => p.kind === 'combat')
+      .map((p) => p.fleetId),
+  ]);
 
   /** Applies everything scheduled at or before `atDay`. */
   const settleDueWork = (atDay: number) => {
@@ -394,12 +473,12 @@ export function runClock(session: GameSession, realMs: number): GameSession {
       const hostile = controller === 'directorate' || controller === 'contested';
 
       if (hostile) {
-        // Only the first hostile arrival found this pass opens Combat
-        // Orders; a second one the same day is left exactly as it is —
-        // still "arrived" with its transit fields intact — and gets caught
-        // again on the next runClock call once this fight is resolved.
-        if (!pendingCombat) {
-          pendingCombat = { fleetId: fleet.id, systemId: fleet.destination };
+        // Left exactly as it is — still "arrived" with its transit fields
+        // intact — until combatPendingFleetIds no longer holds this fleet,
+        // i.e. its combat panel has actually been resolved.
+        if (!combatPendingFleetIds.has(fleet.id)) {
+          combatPendingFleetIds.add(fleet.id);
+          enqueueOrActivate({ kind: 'combat', fleetId: fleet.id, systemId: fleet.destination });
           log.push(
             `Day ${dayLabel(fleet.arrivalDay)} — ${fleet.name} arrives at ` +
               `${systemName(fleet.destination)}. Awaiting combat orders.`,
@@ -514,7 +593,7 @@ export function runClock(session: GameSession, realMs: number): GameSession {
         // A Republic fleet is present: the player chooses a defend stance
         // (commitDirectorateDefense) instead of this resolving automatically.
         directorateAttack = null;
-        pendingDirectorateCombat = { systemId: attack.systemId };
+        enqueueOrActivate({ kind: 'directorateCombat', systemId: attack.systemId });
         log.push(
           `Day ${dayLabel(attack.arrivalDay)} — ${NAVAL_INTELLIGENCE}: the Directorate fleet ` +
             `reaches ${targetName} and closes on the defending fleet. Awaiting combat orders.`,
@@ -583,11 +662,6 @@ export function runClock(session: GameSession, realMs: number): GameSession {
       approvalCollapseStartDay = null;
     }
 
-    if (pendingCombat || pendingDirectorateCombat) {
-      speed = 0;
-      break;
-    }
-
     // Periodic Directorate check: only one attack can be in flight at a
     // time, so skip entirely while one is already underway.
     if (!directorateAttack && boundary >= directorateNextCheckDay) {
@@ -597,10 +671,7 @@ export function runClock(session: GameSession, realMs: number): GameSession {
         if (targetId) {
           const arrivalDays = rollDirectorateArrivalDays();
           directorateAttack = { systemId: targetId, arrivalDay: boundary + arrivalDays };
-          // Resumes to whatever speed is in effect right now, not the speed
-          // the session started this call at — a decision event may have
-          // already dropped it to 1x earlier in this same walk.
-          pendingDirectorateAlert = { systemId: targetId, resumeSpeed: speed };
+          enqueueOrActivate({ kind: 'directorateAlert', systemId: targetId });
           log.push(
             `Day ${boundary} — ${NAVAL_INTELLIGENCE}: unidentified Directorate fleet movement ` +
               `detected. Estimated arrival at ${systemName(targetId)} in ${arrivalDays} days.`,
@@ -609,41 +680,20 @@ export function runClock(session: GameSession, realMs: number): GameSession {
       }
     }
 
-    // Only one decision event is ever open at a time — skip picking a new
-    // one for as long as an earlier one (this walk or a prior tick) is still
-    // unresolved.
-    const event = pendingEventId ? undefined : pickEventForDay(boundary, firedEventIds);
+    const event = pickEventForDay(boundary, firedEventIds);
     if (event) {
-      pendingEventId = event.id;
       firedEventIds = [...firedEventIds, event.id];
       log.push(`Day ${boundary} — Incoming dispatch: ${event.title}.`);
-      // Drops to 1x so a fast-forwarded game doesn't blow past a decision
-      // unnoticed, but — unlike combat or an intelligence alert — never
-      // stops the walk: upkeep, fleets and everything else keep moving
-      // while the decision panel is open.
-      if (speed > 1) speed = 1;
-    }
-
-    // An intelligence alert pauses the clock only briefly (the UI resumes it
-    // automatically), but it still shares the same break-the-walk mechanism
-    // combat arrival uses, so it always lands on a whole day boundary rather
-    // than mid-tick.
-    if (pendingDirectorateAlert) {
-      speed = 0;
-      break;
+      enqueueOrActivate({ kind: 'event', eventId: event.id });
     }
   }
 
-  if (!pendingCombat && !pendingDirectorateAlert && !pendingDirectorateCombat) {
-    days = target;
-    settleDueWork(days);
-    if (pendingCombat || pendingDirectorateCombat) speed = 0;
-  }
+  days = target;
+  settleDueWork(days);
 
   return {
     ...session,
     state: { ...resources, daysElapsed: days, log },
-    speed,
     queued,
     fleets,
     buildQueue,
@@ -661,6 +711,7 @@ export function runClock(session: GameSession, realMs: number): GameSession {
     directorateAttack,
     pendingDirectorateAlert,
     pendingDirectorateCombat,
+    queuedPanels,
     approvalCollapseStartDay,
   };
 }
@@ -698,15 +749,9 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
         session.lastTickAt === null ? session : runClock(session, action.now - session.lastTickAt);
       return {
         ...settled,
-        // A pending decision event no longer forces this to 0 — the player
-        // is free to pick any speed while it's open, same as normal play.
-        speed:
-          settled.pendingCombat ||
-          settled.pendingOccupation ||
-          settled.pendingDirectorateAlert ||
-          settled.pendingDirectorateCombat
-            ? 0
-            : action.speed,
+        // Only an occupation decision still forces this to 0 — every other
+        // pending panel leaves speed entirely up to the player.
+        speed: settled.pendingOccupation ? 0 : action.speed,
         lastTickAt: action.now,
       };
     }
@@ -737,7 +782,7 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
       return {
         ...session,
         state: { ...applyEffects(session.state, choice.effects), log },
-        pendingEventId: null,
+        ...promoteNextPanel(session.queuedPanels),
         queued,
       };
     }
@@ -908,8 +953,8 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
       if (!pending) return session;
       const fleet = session.fleets.find((f) => f.id === pending.fleetId);
       // Defensive: the fleet or system should always exist here, but never
-      // leave the clock stuck paused with no way to clear it if they don't.
-      if (!fleet) return { ...session, pendingCombat: null };
+      // leave this panel stuck open with no way to clear it if they don't.
+      if (!fleet) return { ...session, ...promoteNextPanel(session.queuedPanels) };
 
       const days = session.state.daysElapsed;
       const attackerStrength = fleetStrength(fleet.composition);
@@ -1002,7 +1047,7 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
         state: { ...session.state, log },
         fleets,
         garrisons: { ...session.garrisons, [pending.systemId]: garrisonAfter },
-        pendingCombat: null,
+        ...promoteNextPanel(session.queuedPanels),
       };
     }
 
@@ -1096,22 +1141,19 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
         fleets,
         directorateFleetStrength,
         controllerOverrides,
-        pendingDirectorateCombat: null,
+        ...promoteNextPanel(session.queuedPanels),
       };
     }
 
     case 'commitInvasion': {
-      // Combat, an occupation choice, a Directorate alert or a Directorate
-      // attack still refuse this — those are true hard pauses. A pending
-      // decision event no longer does: invasion is a normal action, always
-      // available with troops aboard at a hostile system, whether or not a
-      // decision panel happens to be open at the same time.
-      if (
-        session.pendingCombat ||
-        session.pendingOccupation ||
-        session.pendingDirectorateAlert ||
-        session.pendingDirectorateCombat
-      ) {
+      // Only an occupation decision refuses this — a true hard pause since
+      // it settles a fight that already happened. Invasion is otherwise a
+      // normal action, always available with troops aboard at a hostile
+      // system, whether or not some other decision panel happens to be open
+      // at the same time. A fleet with a pending combat panel of its own
+      // never reaches here anyway: it has no fleet.location yet (still
+      // "arrived, awaiting orders"), which the check below already refuses.
+      if (session.pendingOccupation) {
         return session;
       }
 
@@ -1156,6 +1198,12 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
         state: { ...session.state, log },
         fleets,
         groundDefenses,
+        // Forced to 0 here, not left for the next tick to catch: the clock's
+        // own hard pause on pendingOccupation only refuses to advance time,
+        // it never zeroes speed by itself, so a fast invasion right after a
+        // higher speed was set would otherwise show that speed as still
+        // "running" (just inert) instead of visibly paused.
+        speed: 0,
         pendingOccupation: { systemId },
       };
     }
@@ -1226,18 +1274,9 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
 
     case 'acknowledgeDirectorateAlert': {
       if (!session.pendingDirectorateAlert) return session;
-      // Combat, occupation or another Directorate attack can land on the
-      // exact same day boundary as the alert; acknowledging it must not
-      // resume the clock out from under one of those, so it only restores
-      // the prior speed when none of them is also pending. A decision event
-      // no longer counts here — it doesn't hard-pause, and resumeSpeed was
-      // already capped for it (if any) at the moment the alert fired.
-      const stillPaused =
-        session.pendingCombat || session.pendingOccupation || session.pendingDirectorateCombat;
       return {
         ...session,
-        pendingDirectorateAlert: null,
-        speed: stillPaused ? 0 : session.pendingDirectorateAlert.resumeSpeed,
+        ...promoteNextPanel(session.queuedPanels),
         lastTickAt: action.now,
       };
     }

@@ -99,15 +99,17 @@ export interface TroopTrainingOrder {
 }
 
 /** A fleet that has reached a Directorate or contested system and is
- *  waiting for the player to commit to attack, or not, before the clock can
- *  resume. */
+ *  waiting for the player to commit to attack, or not. Doesn't pause the
+ *  clock — see PendingPanelItem and GameSession.queuedPanels. */
 export interface PendingCombat {
   fleetId: string;
   systemId: string;
 }
 
 /** A system whose ground defense has just been overrun and is waiting on an
- *  occupation choice before the clock can resume. */
+ *  occupation choice before the clock can resume — the one remaining panel
+ *  that still hard-pauses, since it settles a fight that already happened
+ *  rather than something still unfolding in the background. */
 export interface PendingOccupation {
   systemId: string;
 }
@@ -132,19 +134,31 @@ export interface DirectorateAttack {
 
 /** The just-fired Directorate intelligence alert, shown once as a notice
  *  rather than a decision — cleared automatically a few seconds after it
- *  appears, restoring the speed the clock was running at before the brief
- *  pause it causes. */
+ *  appears. Doesn't touch the clock's speed at all. */
 export interface PendingDirectorateAlert {
   systemId: string;
-  resumeSpeed: Speed;
 }
 
 /** A Directorate attack that has arrived at a system where a Republic fleet
- *  is present: paused, awaiting the player's defend stance choice instead of
- *  resolving automatically. */
+ *  is present: awaiting the player's defend stance choice instead of
+ *  resolving automatically. Doesn't pause the clock. */
 export interface PendingDirectorateCombat {
   systemId: string;
 }
+
+/** One panel — a decision event, a sensor ping, or a combat (attacking or
+ *  defending) — waiting for the player, queued behind whichever one of
+ *  these is currently active. None of these pause the clock or touch its
+ *  speed; the queue exists purely so a second trigger while the player is
+ *  still looking at the first isn't lost or silently overwritten. Only one
+ *  is ever "active" (mirrored into pendingEventId / pendingDirectorateAlert
+ *  / pendingCombat / pendingDirectorateCombat) at a time; the rest sit in
+ *  GameSession.queuedPanels until the active one resolves. */
+export type PendingPanelItem =
+  | { kind: 'event'; eventId: string }
+  | { kind: 'directorateAlert'; systemId: string }
+  | { kind: 'combat'; fleetId: string; systemId: string }
+  | { kind: 'directorateCombat'; systemId: string };
 
 /** Victory or defeat, decided once and permanent: 'result' and 'reason'
  *  drive the end screen and the closing log line, 'day' is the whole day
@@ -225,6 +239,11 @@ export interface GameSession {
   /** A Directorate attack that has arrived where a Republic fleet is
    *  present, awaiting the player's defend stance choice. */
   pendingDirectorateCombat: PendingDirectorateCombat | null;
+  /** Panels waiting behind whichever one of pendingEventId /
+   *  pendingDirectorateAlert / pendingCombat / pendingDirectorateCombat is
+   *  currently active. Promoted into the active slot, front first, the
+   *  moment that one resolves — see promoteNextPanel in state.ts. */
+  queuedPanels: PendingPanelItem[];
   /** The absolute day approval first read at or below zero, cleared the
    *  moment it rises back above zero. Null while approval is healthy. Used
    *  to judge internal collapse: see APPROVAL_COLLAPSE_DAYS in gameEnd.ts. */

@@ -31,6 +31,7 @@ export default function App() {
     pendingEventId,
     pendingCombat,
     pendingOccupation,
+    queuedPanels,
     taxPolicy,
     fleets,
     completedFocusIds,
@@ -82,9 +83,9 @@ export default function App() {
     return () => window.clearInterval(id);
   }, [speed]);
 
-  // The Directorate alert pauses the clock only long enough to be read, then
-  // resumes on its own — no player action required, unlike every other
-  // pending state.
+  // The Directorate alert clears itself a few seconds after it appears — no
+  // player action required, unlike every other pending panel. It no longer
+  // touches the clock's speed at all, just its own visibility.
   useEffect(() => {
     if (!pendingDirectorateAlert) return;
     const id = window.setTimeout(() => {
@@ -153,16 +154,7 @@ export default function App() {
           >
             <span style={{ width: `${(state.daysElapsed % 1) * 100}%` }} />
           </div>
-          <SpeedControls
-            speed={speed}
-            locked={
-              Boolean(pendingCombat) ||
-              Boolean(pendingOccupation) ||
-              Boolean(pendingDirectorateAlert) ||
-              Boolean(pendingDirectorateCombat)
-            }
-            onChange={setSpeed}
-          />
+          <SpeedControls speed={speed} locked={Boolean(pendingOccupation)} onChange={setSpeed} />
         </div>
 
         <dl className="briefing">
@@ -236,6 +228,12 @@ export default function App() {
         </button>
       )}
 
+      {queuedPanels.length > 0 && (
+        <p className="queue-indicator" role="status">
+          +{queuedPanels.length} more waiting
+        </p>
+      )}
+
       <main className="stage">
         <SystemMap
           daysElapsed={state.daysElapsed}
@@ -305,19 +303,16 @@ export default function App() {
           <button className="secondary" onClick={restart}>
             Restart
           </button>
-          {(pendingCombat || pendingOccupation || pendingDirectorateCombat) && (
-            <p className="quiet">
-              Clock paused. Resolve the pending{' '}
-              {pendingCombat || pendingDirectorateCombat ? 'combat' : 'occupation decision'} to
-              resume.
-            </p>
+          {pendingOccupation && (
+            <p className="quiet">Clock paused. Resolve the pending occupation decision to resume.</p>
           )}
-          {pendingEventId && !pendingCombat && !pendingOccupation && !pendingDirectorateCombat && (
-            <p className="quiet">
-              A decision is pending. The clock keeps running at 1x or slower — resolve it whenever
-              you're ready.
-            </p>
-          )}
+          {!pendingOccupation &&
+            (pendingEventId || pendingCombat || pendingDirectorateAlert || pendingDirectorateCombat) && (
+              <p className="quiet">
+                A decision is pending. The clock keeps running at whatever speed you've set —
+                resolve it whenever you're ready.
+              </p>
+            )}
         </div>
       </footer>
     </div>

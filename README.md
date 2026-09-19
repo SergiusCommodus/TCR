@@ -35,14 +35,32 @@ the interval it lands in is neither lost nor counted twice.
 
 Whole days are then walked one at a time so daily upkeep, delayed effects,
 fleet arrivals and event thresholds land in order even when a single long tick
-spans several days. A political or narrative decision event no longer stops
-that walk: it drops the speed to 1x if it was running faster, but the clock
-keeps ticking with the panel open, and the player is free to pick any speed,
-including pausing manually, while it's unresolved — the drop is a one-time
-floor, not a lock. Combat arriving (either side) and an occupation decision
-are the exception: those still clamp the walk to that exact day and force the
-speed to paused, with every other speed disabled until resolved, since they
-represent an active engagement rather than a background decision.
+spans several days. Nothing in that walk touches speed anymore except an
+occupation decision: a political or narrative decision event, a Directorate
+intelligence alert, and combat arriving (either side) all open their panel and
+let the walk keep going exactly as if nothing were pending — upkeep, fleets,
+construction and everything else on the clock keep advancing in the
+background while the player decides at their own pace, at whatever speed they
+already had selected. The only ways speed ever changes are the player picking
+a different one or pausing manually. An occupation decision is the one
+exception: since it settles a fight that already happened rather than
+something still unfolding, it still clamps the walk to that exact day and
+forces the speed to paused, with every other speed disabled until resolved.
+
+Since panels can no longer rely on pausing to hold the player's attention, a
+second decision, alert or combat trigger firing while an earlier one is still
+open doesn't replace it or get lost — it queues (`GameSession.queuedPanels`)
+behind whichever one is active, and promotes automatically, front first, the
+moment the active one resolves (`promoteNextPanel` in `src/game/state.ts`).
+A small pill (`+N more waiting`) appears near the pending hint banners
+whenever more than one item is waiting, so the player always knows something
+else needs attention even though nothing is forcing them to look. At most one
+panel is ever "active" (mirrored into `pendingEventId`,
+`pendingDirectorateAlert`, `pendingCombat` or `pendingDirectorateCombat`) at a
+time; the rest sit in the queue. A fleet left "arrived, awaiting orders" is
+never re-detected or re-logged on a later day boundary — `runClock` tracks
+which fleets already have a combat panel open or queued and skips them until
+that panel actually resolves.
 
 ## The screen
 
@@ -62,9 +80,10 @@ blue, Directorate red, contested amber). Clicking a node opens its side panel.
   choice, and every fleet movement.
 
 A node with a pending decision gets a marker, and a hint bar appears whenever
-that decision is off screen (wrong system selected, or the right system open on
-another tab) so a running-but-slowed or paused clock always has a visible
-cause.
+that decision is off screen (wrong system selected, or the right system open
+on another tab), so a panel waiting for attention is never silently lost even
+though the clock keeps running right through it. A small `+N more waiting`
+pill appears alongside the hint bars whenever more than one panel is queued.
 
 Six systems in total: Sol (the capital) and Anchorage (a forward naval
 station) started Republic; New Virginia started Directorate held, per the
@@ -193,12 +212,12 @@ Orders panel would show is visible before committing to an attack, not only
 once a fleet has already arrived and triggered one.
 
 When a fleet's travel countdown reaches zero and its destination is
-Directorate or contested, arrival does not complete. The clock hard pauses
-(every speed but Paused is disabled, unlike the softer drop a decision event
-causes) and a Combat Orders panel opens in that system's Military tab, showing
-the attacking fleet's composition and strength side by side with the
-defending garrison's strength, followed by a stance choice — see Combat
-stances below.
+Directorate or contested, arrival does not complete. A Combat Orders panel
+opens in that system's Military tab, showing the attacking fleet's
+composition and strength side by side with the defending garrison's strength,
+followed by a stance choice — see Combat stances below — but the clock keeps
+running at whatever speed the player has selected; only resolving the panel
+by committing a stance actually settles the fight.
 
 On commit (`src/game/combat.ts` and `src/game/stance.ts`), both sides roll
 their strength with variance and whichever total is higher wins. Both sides
@@ -249,7 +268,7 @@ ground invasion's own call is untouched and keeps the original band.
 The exact same stance panel is used in two places: committing to a naval
 attack on a Directorate or contested system, and defending a Republic system
 once a Directorate attack's countdown reaches zero — see Directorate AI
-below for how that pause is triggered. Whichever side the player is on, the
+below for how that panel is triggered. Whichever side the player is on, the
 stance always modifies *their own* strength; the opponent's is never
 touched. If no Republic fleet is present when a Directorate attack lands, it
 still resolves automatically against the baseline defense of 2 exactly as
@@ -306,8 +325,10 @@ survive; it's the troops they carried that are gone); one that leaves
 troops standing can simply retry, since a failed attempt still wears down
 the defense.
 
-A won invasion opens an Occupation Decision, pausing the clock like any
-other event: four choices in `src/game/occupation.ts` — Bombard, Enslave and
+A won invasion opens an Occupation Decision, still hard pausing the clock —
+the one panel that does, since it settles a fight that already happened
+rather than something still unfolding: four choices in `src/game/occupation.ts`
+— Bombard, Enslave and
 Deport, Exterminate, Occupy and Govern — each with a population and approval
 effect (there is no per-system population tracked, so the consequence is
 narrated as falling on the taken system while mechanically landing on the
@@ -327,7 +348,8 @@ than a second card component — it never enters `EVENTS` or `firedEventIds`.
 
 A system's live controller, not its static baseline, is what decides
 whether an arriving fleet triggers combat at all — a system Occupy and
-Govern has already flipped no longer pauses the clock for a later arrival.
+Govern has already flipped no longer opens a combat panel for a later
+arrival.
 
 ## Manpower and tax policy
 
@@ -370,8 +392,8 @@ A sixth tab, Focus, carries a single linear path of eleven National Focuses
 one can be underway at a time, and starting one deducts its `leadershipCost`
 immediately and begins a day based countdown using the exact same absolute
 `completesOnDay` / `settleDueWork` mechanism as fleet transit and ship
-construction — it never pauses the clock at all, unlike combat or an
-occupation decision (a pending event only slows it). `GameSession.activeFocus`
+construction — it never pauses the clock at all, same as everything else now
+except an occupation decision. `GameSession.activeFocus`
 (the one in progress, or
 `null`) and `completedFocusIds` (finished ones, in path order) are the two
 new live fields; the next startable focus is always the one at
@@ -444,26 +466,23 @@ targets, never guaranteed ones.
 
 The decision doesn't resolve immediately. An intelligence alert — sourced to
 the deliberately generic "Naval Intelligence" rather than an invented agency
-name — logs the target and a random 3 to 7 day estimated arrival, and
-briefly hard pauses the clock (the same `speed: 0` combat and occupation use,
-a stronger stop than the 1x floor a decision event causes) so it's impossible
-to miss even at 20x. Unlike every other pending state, nothing needs to be
-dismissed: a timer in `App.tsx` acknowledges the
-alert on its own a few seconds later and the clock resumes at whatever speed
-it was running before, mirrored by an "incoming" marker on the map that
-stays lit for the whole countdown. The countdown itself runs on the
-identical absolute day mechanism as fleet transit and ship construction
-(`directorateAttack.arrivalDay`, resolved in `settleDueWork`) — the clock
-never pauses again for it, so the player is free to reassign fleets to
-reinforce the target for the rest of the window, exactly like any other
-fleet order.
+name — logs the target and a random 3 to 7 day estimated arrival, and shows a
+banner so it's impossible to miss even at 20x, but doesn't touch the clock's
+speed at all. Nothing needs to be dismissed: a timer in `App.tsx`
+acknowledges the alert on its own a few seconds later, mirrored by an
+"incoming" marker on the map that stays lit for the whole countdown. The
+countdown itself runs on the identical absolute day mechanism as fleet
+transit and ship construction (`directorateAttack.arrivalDay`, resolved in
+`settleDueWork`), so the player is free to reassign fleets to reinforce the
+target for the rest of the window, exactly like any other fleet order.
 
 On arrival, `directorateFleetStrength` splits roughly 70% naval / 30% ground
 troops. If a Republic fleet is stationed at the target system (summed across
-every fleet there), arrival pauses the clock and opens the same combat
-stance panel a player initiated attack uses — see Combat stances above —
-letting the player defend with Aggressive, Moderate or Defensive rather than
-the fight resolving on its own (`pendingDirectorateCombat`,
+every fleet there), arrival opens the same combat stance panel a player
+initiated attack uses — see Combat stances above — letting the player defend
+with Aggressive, Moderate or Defensive rather than the fight resolving on its
+own, with the clock running the whole time until a stance is actually
+committed (`pendingDirectorateCombat`,
 `commitDirectorateDefense`). An undefended system has nothing to command, so
 it still resolves automatically at Moderate strength against a small
 baseline defense of 2, exactly as before. Either way the roll goes through
@@ -524,15 +543,17 @@ logic every other Restart button in the app already uses.
 - `GameSession` wraps `GameState` with the clock (`speed`, `lastTickAt`), the
   pending event, a pending combat if a fleet has arrived at a hostile system
   and not yet been ordered to attack, a pending occupation if an invasion has
-  just succeeded, a pending Directorate defend stance choice, queued delayed
-  effects, fleets, the ship build queue, the ground troop training queue
-  (`trainingQueue`) and pool (`groundTroopPool`, per system id), current
-  garrison and ground defense strength per system, each system's live
-  controller override, the standing tax policy, National Focus progress
-  (`completedFocusIds`, `activeFocus`), the Directorate's own fleet strength,
-  next check day, in-flight attack and pending alert, the approval collapse
-  tracker (`approvalCollapseStartDay`), and `gameOver` once a win or loss
-  condition has triggered.
+  just succeeded, a pending Directorate defend stance choice, a queue of
+  panels waiting behind whichever of those is currently active
+  (`queuedPanels`, promoted front first as the active one resolves — see The
+  clock above), queued delayed effects, fleets, the ship build queue, the
+  ground troop training queue (`trainingQueue`) and pool (`groundTroopPool`,
+  per system id), current garrison and ground defense strength per system,
+  each system's live controller override, the standing tax policy, National
+  Focus progress (`completedFocusIds`, `activeFocus`), the Directorate's own
+  fleet strength, next check day, in-flight attack and pending alert, the
+  approval collapse tracker (`approvalCollapseStartDay`), and `gameOver` once
+  a win or loss condition has triggered.
 
 `Effects` deliberately excludes `daysElapsed`: time comes from the clock, never
 from a choice's deltas.
