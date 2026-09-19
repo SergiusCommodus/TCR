@@ -183,6 +183,15 @@ actually changes as battles are fought lives in `GameSession.garrisons`
 (a map of system id to current strength), the same split as a ship type's
 fixed data versus a fleet's live composition.
 
+Whichever Directorate or contested system is selected shows its current
+`garrisons` and `groundDefenses` values plainly in the system panel's
+header — a `panel-stats` block, the same labelled dt/dd treatment the
+status bar's national Briefing already uses, sitting under the panel note
+regardless of which tab is open. A Republic system shows none: it never had
+either value to begin with. The point is the same known strength a Combat
+Orders panel would show is visible before committing to an attack, not only
+once a fleet has already arrived and triggered one.
+
 When a fleet's travel countdown reaches zero and its destination is
 Directorate or contested, arrival does not complete. The clock hard pauses
 (every speed but Paused is disabled, unlike the softer drop a decision event
@@ -224,15 +233,18 @@ always retreats with partial losses instead of being destroyed outright
 (`guaranteeSurvivor` in `src/game/state.ts` keeps at least one ship alive to
 retreat with, even at a near total loss).
 
-Before committing, each stance shows an estimated win chance —
-`estimateWinChance` in `src/game/stance.ts`, the ratio of the stance
-holder's stance-modified effective strength to the total strength in play,
-rounded to a percentage. It's a displayed estimate to inform the choice, not
-a guaranteed outcome: `resolveStanceCombat` still rolls through
-`rollCombat`'s own variance to actually resolve it. `rollCombat` itself
-gained an optional `variance` parameter (default the original ±20%) purely
-so a stance can override it — ground invasion's own call is untouched and
-keeps the original band.
+Above the stance choices, the panel shows both sides' raw strength — the
+player's own (plus composition, if it's a fleet) and the opponent's — not
+just the odds derived from them, so the numbers behind a stance's estimate
+are always visible, not hidden behind a single percentage. Each stance then
+shows its own estimated win chance next to it — `estimateWinChance` in
+`src/game/stance.ts`, the ratio of the stance holder's stance-modified
+effective strength to the total strength in play, rounded to a percentage.
+It's a displayed estimate to inform the choice, not a guaranteed outcome:
+`resolveStanceCombat` still rolls through `rollCombat`'s own variance to
+actually resolve it. `rollCombat` itself gained an optional `variance`
+parameter (default the original ±20%) purely so a stance can override it —
+ground invasion's own call is untouched and keeps the original band.
 
 The exact same stance panel is used in two places: committing to a naval
 attack on a Directorate or contested system, and defending a Republic system

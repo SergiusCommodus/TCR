@@ -650,6 +650,18 @@ export default function SystemPanel({
         <p className="panel-eyebrow">{CONTROLLER_LABEL[controller]}</p>
         <h2>{system.name}</h2>
         <p className="panel-note">{system.note}</p>
+        {isHostile && (
+          <dl className="panel-stats">
+            <div>
+              <dt>Garrison</dt>
+              <dd>{garrisons[system.id] ?? 0}</dd>
+            </div>
+            <div>
+              <dt>Ground Defense</dt>
+              <dd>{groundDefenses[system.id] ?? 0}</dd>
+            </div>
+          </dl>
+        )}
       </header>
 
       <div className="tabs" role="tablist" aria-label={`${system.name} administration`}>
