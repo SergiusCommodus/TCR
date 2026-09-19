@@ -186,6 +186,22 @@ body {
   color: var(--contested);
 }
 
+.directorate-alert {
+  border: 1px solid var(--directorate);
+  border-left-width: 3px;
+  background: linear-gradient(180deg, var(--directorate-dim), var(--hull) 60%);
+  border-radius: 3px;
+  padding: 0.9rem 1.1rem;
+}
+
+.directorate-alert .banner-eyebrow {
+  color: var(--directorate);
+}
+
+.directorate-alert p:last-child {
+  margin: 0;
+}
+
 .pending-hint {
   font: inherit;
   text-align: left;
@@ -350,6 +366,11 @@ body {
   text-align: center;
   text-transform: none;
   letter-spacing: 0.02em;
+}
+
+.node-tag-incoming {
+  color: var(--directorate);
+  border-color: var(--directorate);
 }
 
 .fleet-marker {

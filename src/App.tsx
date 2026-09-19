@@ -4,6 +4,7 @@ import SpeedControls from './components/SpeedControls';
 import SystemMap from './components/SystemMap';
 import SystemPanel from './components/SystemPanel';
 import type { Tab } from './components/SystemPanel';
+import { NAVAL_INTELLIGENCE } from './game/directorate';
 import { findEvent } from './game/events';
 import { dayLabel, initialSession, reducer } from './game/state';
 import { HOME_SYSTEM_ID, SYSTEMS, scopeOf, systemById, systemName } from './game/systems';
@@ -32,6 +33,8 @@ export default function App() {
     fleets,
     completedFocusIds,
     activeFocus,
+    directorateAttack,
+    pendingDirectorateAlert,
   } = session;
 
   const pendingSystemId = pendingSystemOf(pendingEventId);
@@ -68,6 +71,17 @@ export default function App() {
     );
     return () => window.clearInterval(id);
   }, [speed, pendingEventId]);
+
+  // The Directorate alert pauses the clock only long enough to be read, then
+  // resumes on its own — no player action required, unlike every other
+  // pending state.
+  useEffect(() => {
+    if (!pendingDirectorateAlert) return;
+    const id = window.setTimeout(() => {
+      dispatch({ type: 'acknowledgeDirectorateAlert', now: performance.now() });
+    }, 4500);
+    return () => window.clearTimeout(id);
+  }, [pendingDirectorateAlert]);
 
   const setSpeed = (next: Speed) =>
     dispatch({ type: 'setSpeed', speed: next, now: performance.now() });
@@ -121,7 +135,12 @@ export default function App() {
           </div>
           <SpeedControls
             speed={speed}
-            locked={Boolean(pendingEventId) || Boolean(pendingCombat) || Boolean(pendingOccupation)}
+            locked={
+              Boolean(pendingEventId) ||
+              Boolean(pendingCombat) ||
+              Boolean(pendingOccupation) ||
+              Boolean(pendingDirectorateAlert)
+            }
             onChange={setSpeed}
           />
         </div>
@@ -160,6 +179,17 @@ export default function App() {
         </section>
       )}
 
+      {pendingDirectorateAlert && directorateAttack && (
+        <section className="directorate-alert" aria-label="Naval Intelligence alert" role="status">
+          <p className="banner-eyebrow">{NAVAL_INTELLIGENCE} — fleet movement alert</p>
+          <p>
+            Unidentified Directorate fleet movement detected. Estimated arrival at{' '}
+            {systemName(directorateAttack.systemId)} in{' '}
+            {Math.max(1, Math.ceil(directorateAttack.arrivalDay - state.daysElapsed))} days.
+          </p>
+        </section>
+      )}
+
       {pendingSystemId && !decisionVisible && (
         <button className="pending-hint" onClick={openPendingSystem}>
           Decision pending at {systemName(pendingSystemId)} — open its Political tab
@@ -186,6 +216,7 @@ export default function App() {
           pendingSystemId={pendingSystemId}
           pendingCombatSystemId={pendingCombat?.systemId ?? null}
           pendingOccupationSystemId={pendingOccupation?.systemId ?? null}
+          directorateTargetSystemId={directorateAttack?.systemId ?? null}
           controllerOverrides={session.controllerOverrides}
           fleets={fleets}
           onSelect={setSelectedId}

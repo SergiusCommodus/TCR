@@ -1,4 +1,19 @@
 import { rollCombat } from './combat';
+import {
+  DIRECTORATE_ATTACK_THRESHOLD,
+  DIRECTORATE_BASELINE_DEFENSE,
+  DIRECTORATE_FLEET_GROWTH_PER_DAY,
+  DIRECTORATE_INITIAL_FLEET_STRENGTH,
+  DIRECTORATE_NAVAL_SHARE,
+  DIRECTORATE_TRAITS,
+  NAVAL_INTELLIGENCE,
+  defendingStrengthAt,
+  directorateWantsToAttack,
+  pickDirectorateTarget,
+  rollDirectorateArrivalDays,
+  rollDirectorateCheckInterval,
+  rollDirectorateOccupationOutcome,
+} from './directorate';
 import { EVENTS, findEvent } from './events';
 import { FOCUS_PATH } from './focuses';
 import { OCCUPATION_CHOICES } from './occupation';
@@ -21,6 +36,7 @@ import type {
   GameSession,
   GameState,
   PendingCombat,
+  PendingDirectorateAlert,
   QueuedEffects,
   ShipType,
   Speed,
@@ -225,6 +241,10 @@ export function initialSession(): GameSession {
     taxPolicy: 'standard',
     completedFocusIds: [],
     activeFocus: null,
+    directorateFleetStrength: DIRECTORATE_INITIAL_FLEET_STRENGTH,
+    directorateNextCheckDay: rollDirectorateCheckInterval(),
+    directorateAttack: null,
+    pendingDirectorateAlert: null,
   };
 }
 
@@ -249,7 +269,7 @@ function pickEventForDay(day: number, firedEventIds: string[]): EventDef | undef
  * walk: the clock is clamped to that day and the speed drops to paused, so no
  * in game time runs past a decision the player has not made yet.
  */
-function runClock(session: GameSession, realMs: number): GameSession {
+export function runClock(session: GameSession, realMs: number): GameSession {
   if (
     session.pendingEventId ||
     session.pendingCombat ||
@@ -271,9 +291,14 @@ function runClock(session: GameSession, realMs: number): GameSession {
   let firedEventIds = session.firedEventIds;
   let activeFocus = session.activeFocus;
   let completedFocusIds = session.completedFocusIds;
+  let controllerOverrides = session.controllerOverrides;
+  let directorateFleetStrength = session.directorateFleetStrength;
+  let directorateNextCheckDay = session.directorateNextCheckDay;
+  let directorateAttack = session.directorateAttack;
   let days = session.state.daysElapsed;
   let pendingEventId: string | null = null;
   let pendingCombat: PendingCombat | null = null;
+  let pendingDirectorateAlert: PendingDirectorateAlert | null = null;
   let speed: Speed = session.speed;
 
   /** Applies everything scheduled at or before `atDay`. */
@@ -295,7 +320,7 @@ function runClock(session: GameSession, realMs: number): GameSession {
       const destination = systemById(fleet.destination);
       // Live controller, not the static baseline: a system Occupy and Govern
       // has already flipped to Republic no longer triggers combat on arrival.
-      const controller = destination && currentController(destination, session.controllerOverrides);
+      const controller = destination && currentController(destination, controllerOverrides);
       const hostile = controller === 'directorate' || controller === 'contested';
 
       if (hostile) {
@@ -394,6 +419,69 @@ function runClock(session: GameSession, realMs: number): GameSession {
         );
       }
     }
+
+    if (directorateAttack && directorateAttack.arrivalDay <= atDay) {
+      const attack = directorateAttack;
+      directorateAttack = null;
+
+      const targetName = systemName(attack.systemId);
+      const rawDefense = defendingStrengthAt(attack.systemId, fleets);
+      const defenderStrength = rawDefense > 0 ? rawDefense : DIRECTORATE_BASELINE_DEFENSE;
+      const navalStrength = directorateFleetStrength * DIRECTORATE_NAVAL_SHARE;
+      const groundTroops = directorateFleetStrength * (1 - DIRECTORATE_NAVAL_SHARE);
+      const outcome = rollCombat(navalStrength, defenderStrength);
+
+      log.push(
+        `Day ${dayLabel(attack.arrivalDay)} — ${NAVAL_INTELLIGENCE}: the Directorate fleet reaches ` +
+          `${targetName} (${Math.round(navalStrength)} strength, an estimated ` +
+          `${Math.round(groundTroops)} ground troops aboard) and engages ` +
+          `${rawDefense > 0 ? 'the defending fleet' : `${targetName}'s minimal garrison`} ` +
+          `(${Math.round(defenderStrength)} strength). ` +
+          `${outcome.attackerWins ? 'The Directorate fleet breaks through.' : 'The Republic defense holds.'}`,
+      );
+
+      // Defenders take proportional losses either way, same as any other
+      // naval engagement — win or lose, a fight this size leaves marks.
+      if (rawDefense > 0) {
+        fleets = fleets.flatMap((fleet) => {
+          if (fleet.location !== attack.systemId) return [fleet];
+          const survivors = applyCompositionLosses(fleet.composition, outcome.defenderLossFraction);
+          if (fleetStrength(survivors) <= 0) {
+            log.push(
+              `Day ${dayLabel(attack.arrivalDay)} — ${fleet.name} is destroyed defending ${targetName}.`,
+            );
+            return [];
+          }
+          return [{ ...fleet, composition: survivors }];
+        });
+      }
+
+      if (outcome.attackerWins) {
+        // Even a winning attacker takes proportional losses, same as the
+        // player's own commitAttack; the survivors are what remains of the
+        // Directorate's standing force going forward.
+        directorateFleetStrength = applySurvivingShare(
+          directorateFleetStrength,
+          outcome.attackerLossFraction,
+        );
+        const outcomeChoice = rollDirectorateOccupationOutcome(DIRECTORATE_TRAITS.brutality);
+        resources = applyEffects(resources, outcomeChoice.effects);
+        log.push(
+          `Day ${dayLabel(attack.arrivalDay)} — ${outcomeChoice.label}: ` +
+            `${outcomeChoice.resultText(targetName)} (${describeEffects(outcomeChoice.effects)})`,
+        );
+        if (outcomeChoice.flipsControl) {
+          controllerOverrides = { ...controllerOverrides, [attack.systemId]: 'directorate' };
+        }
+      } else {
+        // A defensive win costs the Directorate its committed fleet outright
+        // — nothing else about the system changes.
+        directorateFleetStrength = 0;
+        log.push(
+          `Day ${dayLabel(attack.arrivalDay)} — The Directorate fleet is destroyed at ${targetName}.`,
+        );
+      }
+    }
   };
 
   const upkeep = dailyUpkeepFor(session.taxPolicy, session.completedFocusIds);
@@ -401,6 +489,10 @@ function runClock(session: GameSession, realMs: number): GameSession {
   for (let boundary = Math.floor(days) + 1; boundary <= target; boundary++) {
     days = boundary;
     resources = applyEffects(resources, upkeep);
+    // Unseen passive production, the same way materiel accrues for the
+    // Republic — never applied through Effects/describeEffects since it
+    // isn't part of GameState and the player never sees it directly.
+    directorateFleetStrength += DIRECTORATE_FLEET_GROWTH_PER_DAY;
     log.push(`Day ${boundary} — The war effort grinds on (${describeEffects(upkeep)}).`);
     settleDueWork(boundary);
 
@@ -409,17 +501,42 @@ function runClock(session: GameSession, realMs: number): GameSession {
       break;
     }
 
+    // Periodic Directorate check: only one attack can be in flight at a
+    // time, so skip entirely while one is already underway.
+    if (!directorateAttack && boundary >= directorateNextCheckDay) {
+      directorateNextCheckDay = boundary + rollDirectorateCheckInterval();
+      if (directorateWantsToAttack(directorateFleetStrength, DIRECTORATE_TRAITS, DIRECTORATE_ATTACK_THRESHOLD)) {
+        const targetId = pickDirectorateTarget(controllerOverrides, fleets);
+        if (targetId) {
+          const arrivalDays = rollDirectorateArrivalDays();
+          directorateAttack = { systemId: targetId, arrivalDay: boundary + arrivalDays };
+          pendingDirectorateAlert = { systemId: targetId, resumeSpeed: session.speed };
+          log.push(
+            `Day ${boundary} — ${NAVAL_INTELLIGENCE}: unidentified Directorate fleet movement ` +
+              `detected. Estimated arrival at ${systemName(targetId)} in ${arrivalDays} days.`,
+          );
+        }
+      }
+    }
+
     const event = pickEventForDay(boundary, firedEventIds);
     if (event) {
       pendingEventId = event.id;
       firedEventIds = [...firedEventIds, event.id];
-      speed = 0;
       log.push(`Day ${boundary} — Incoming dispatch: ${event.title}. Clock paused.`);
+    }
+
+    // An intelligence alert pauses the clock only briefly (the UI resumes it
+    // automatically), but it still shares the same break-the-walk mechanism
+    // a scripted event or combat arrival uses, so it always lands on a whole
+    // day boundary rather than mid-tick.
+    if (pendingDirectorateAlert || pendingEventId) {
+      speed = 0;
       break;
     }
   }
 
-  if (!pendingEventId && !pendingCombat) {
+  if (!pendingEventId && !pendingCombat && !pendingDirectorateAlert) {
     days = target;
     settleDueWork(days);
     if (pendingCombat) speed = 0;
@@ -438,6 +555,11 @@ function runClock(session: GameSession, realMs: number): GameSession {
     pendingCombat,
     activeFocus,
     completedFocusIds,
+    controllerOverrides,
+    directorateFleetStrength,
+    directorateNextCheckDay,
+    directorateAttack,
+    pendingDirectorateAlert,
   };
 }
 
@@ -450,6 +572,7 @@ export type GameAction =
   | { type: 'commitOccupation'; choiceIndex: number }
   | { type: 'setTaxPolicy'; policy: TaxPolicy }
   | { type: 'startFocus'; focusId: string }
+  | { type: 'acknowledgeDirectorateAlert'; now: number }
   | { type: 'setSpeed'; speed: Speed; now: number }
   | { type: 'tick'; now: number }
   | { type: 'reset' };
@@ -470,7 +593,10 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
       return {
         ...settled,
         speed:
-          settled.pendingEventId || settled.pendingCombat || settled.pendingOccupation
+          settled.pendingEventId ||
+          settled.pendingCombat ||
+          settled.pendingOccupation ||
+          settled.pendingDirectorateAlert
             ? 0
             : action.speed,
         lastTickAt: action.now,
@@ -789,6 +915,16 @@ export function reducer(session: GameSession, action: GameAction): GameSession {
         ...session,
         state: { ...applyEffects(session.state, cost), log },
         activeFocus,
+      };
+    }
+
+    case 'acknowledgeDirectorateAlert': {
+      if (!session.pendingDirectorateAlert) return session;
+      return {
+        ...session,
+        pendingDirectorateAlert: null,
+        speed: session.pendingDirectorateAlert.resumeSpeed,
+        lastTickAt: action.now,
       };
     }
 

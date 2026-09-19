@@ -10,6 +10,10 @@ interface Props {
   pendingSystemId: string | null;
   pendingCombatSystemId: string | null;
   pendingOccupationSystemId: string | null;
+  /** Set while a Directorate attack is counting down to arrival, so the
+   *  target stays visible on the map for the whole countdown, not just the
+   *  moment the alert fires. */
+  directorateTargetSystemId: string | null;
   controllerOverrides: Record<string, Controller>;
   fleets: Fleet[];
   onSelect: (systemId: string) => void;
@@ -39,6 +43,7 @@ export default function SystemMap({
   pendingSystemId,
   pendingCombatSystemId,
   pendingOccupationSystemId,
+  directorateTargetSystemId,
   controllerOverrides,
   fleets,
   onSelect,
@@ -103,6 +108,9 @@ export default function SystemMap({
               {pendingCombatSystemId === system.id && <span className="node-tag">combat</span>}
               {pendingOccupationSystemId === system.id && (
                 <span className="node-tag">occupation</span>
+              )}
+              {directorateTargetSystemId === system.id && (
+                <span className="node-tag node-tag-incoming">incoming</span>
               )}
               {here.length > 0 && (
                 <span className="node-tag node-tag-fleet">

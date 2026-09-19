@@ -294,6 +294,59 @@ remaining days prominently, both in a summary line above the path and inline
 on its node; completed nodes, the active node and locked future nodes are
 each visually distinct.
 
+## Directorate AI and intelligence alerts
+
+Three fixed campaign traits in `src/game/directorate.ts` — aggression 0.6,
+patience 0.4, brutality 0.7, each on a 0 to 1 scale — turn the Directorate
+from a static garrison into an opponent that acts on its own. An abstract
+`directorateFleetStrength` (`GameSession`, starting at 8) grows passively by
+0.6 a day, the same way materiel accrues for the Republic; there is no
+Directorate economy panel, only the results of it.
+
+Roughly every 5 to 7 days (`directorateNextCheckDay`), the Directorate
+evaluates whether to attack: below a threshold of 20 it never does; above it,
+`directorateWantsToAttack` weighs aggression against accumulated surplus
+strength, damped by patience, plus random noise, so action becomes likelier
+but never certain as strength and time build up. When it decides to act,
+`pickDirectorateTarget` weighs every Republic controlled system by nearness
+to New Virginia (its staging system) and by how weakly defended it currently
+is, then rolls a weighted pick — nearer and weaker systems are more likely
+targets, never guaranteed ones.
+
+The decision doesn't resolve immediately. An intelligence alert — sourced to
+the deliberately generic "Naval Intelligence" rather than an invented agency
+name — logs the target and a random 3 to 7 day estimated arrival, and
+briefly pauses the clock (the same `speed: 0` mechanism a scripted event
+uses) so it's impossible to miss even at 5x. Unlike every other pending
+state, nothing needs to be dismissed: a timer in `App.tsx` acknowledges the
+alert on its own a few seconds later and the clock resumes at whatever speed
+it was running before, mirrored by an "incoming" marker on the map that
+stays lit for the whole countdown. The countdown itself runs on the
+identical absolute day mechanism as fleet transit and ship construction
+(`directorateAttack.arrivalDay`, resolved in `settleDueWork`) — the clock
+never pauses again for it, so the player is free to reassign fleets to
+reinforce the target for the rest of the window, exactly like any other
+fleet order.
+
+On arrival, `directorateFleetStrength` splits roughly 70% naval / 30% ground
+troops and rolls against whatever Republic fleet is stationed at the target
+system (summed across every fleet there) through the same `rollCombat`
+naval combat already uses; an undefended system falls back to a small
+baseline defense of 2. A Republic win destroys the Directorate's committed
+fleet outright and changes nothing else — no occupation follows a purely
+defensive win. A Directorate win resolves an occupation automatically, no
+player choice this time: `rollDirectorateOccupationOutcome` weights Bombard
+and Exterminate (split evenly), Enslave and Deport, and Occupy and Govern by
+brutality — at 0.7 that lands at roughly 55% / 30% / 15% — and applies the
+exact same population and approval effects `OCCUPATION_CHOICES` already
+defines for the player's own invasions, narrated from the Directorate's side
+rather than the Republic's. Only Occupy and Govern flips the system to
+Directorate control, the same asymmetry the player's own Occupy and Govern
+already has in reverse.
+
+Alert, arrival and outcome are all logged in the same narrated voice as
+everything else in the history panel.
+
 ## Data model
 
 `src/game/types.ts`:
@@ -311,7 +364,8 @@ each visually distinct.
   just succeeded, queued delayed effects, fleets, the build queue, current
   garrison and ground defense strength per system, each system's live
   controller override, the standing tax policy, and National Focus
-  progress (`completedFocusIds`, `activeFocus`).
+  progress (`completedFocusIds`, `activeFocus`), and the Directorate's own
+  fleet strength, next check day, in-flight attack and pending alert.
 
 `Effects` deliberately excludes `daysElapsed`: time comes from the clock, never
 from a choice's deltas.
@@ -342,6 +396,10 @@ concerns. An event id missing from that map falls back to `'global'`.
   `EventDef` that lets DecisionCard render them.
 - `src/game/focuses.ts` — the seven National Focus definitions: name,
   description, days, leadership cost, narrated log lines, and effects.
+- `src/game/directorate.ts` — Directorate traits, fleet strength growth,
+  the periodic attack decision and target weighting, and the automatic
+  occupation outcome roll, re-narrated from OCCUPATION_CHOICES.
 - `src/components/` — `SystemMap`, `SystemPanel` (tabs, including the
   Shipyard, Invade, Tax Policy and Focus tree controls), `SpeedControls`, `DecisionCard`
-  (shared by the Political tab and the national banner).
+  (shared by the Political tab and the national banner); the map also shows
+  an "incoming" marker on a system targeted by a Directorate attack.

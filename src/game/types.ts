@@ -110,6 +110,24 @@ export interface ActiveFocus {
   completesOnDay: number;
 }
 
+/** A Directorate attack in flight: decided and alerted, counting down to
+ *  arrival on the same day based clock as fleet transit. */
+export interface DirectorateAttack {
+  systemId: string;
+  /** Absolute day the fleet arrives and combat resolves, drift free like
+   *  everything else on the clock. */
+  arrivalDay: number;
+}
+
+/** The just-fired Directorate intelligence alert, shown once as a notice
+ *  rather than a decision — cleared automatically a few seconds after it
+ *  appears, restoring the speed the clock was running at before the brief
+ *  pause it causes. */
+export interface PendingDirectorateAlert {
+  systemId: string;
+  resumeSpeed: Speed;
+}
+
 /** 0 is paused; 1 through 5 are the in game days per real minute. */
 export type Speed = 0 | 1 | 2 | 3 | 4 | 5;
 
@@ -154,4 +172,17 @@ export interface GameSession {
   /** The focus currently in progress, or null when none is. Only one focus
    *  can ever be underway at a time. */
   activeFocus: ActiveFocus | null;
+  /** The Directorate's abstract fleet strength: an unseen number that grows
+   *  passively over time, the same way materiel accrues for the Republic.
+   *  Never shown to the player directly. */
+  directorateFleetStrength: number;
+  /** Absolute day of the next periodic check for whether the Directorate
+   *  launches an attack. */
+  directorateNextCheckDay: number;
+  /** A decided, alerted Directorate attack counting down to arrival, or null
+   *  when none is in flight. Only one can be underway at a time. */
+  directorateAttack: DirectorateAttack | null;
+  /** The just-fired intelligence alert, shown once and cleared automatically
+   *  a few seconds later — see PendingDirectorateAlert. */
+  pendingDirectorateAlert: PendingDirectorateAlert | null;
 }
