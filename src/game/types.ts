@@ -146,8 +146,8 @@ export interface GameEndState {
   day: number;
 }
 
-/** 0 is paused; 1 through 5 are the in game days per real minute. */
-export type Speed = 0 | 1 | 2 | 3 | 4 | 5;
+/** 0 is paused; 1, 5, 10 and 20 are the in game days per real minute. */
+export type Speed = 0 | 1 | 5 | 10 | 20;
 
 /** Low trades materiel income for approval over time; Wartime trades the
  *  other way; Standard is the untouched baseline drift. */

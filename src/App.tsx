@@ -74,13 +74,13 @@ export default function App() {
   }, [state.log.length]);
 
   useEffect(() => {
-    if (speed === 0 || pendingEventId) return;
+    if (speed === 0) return;
     const id = window.setInterval(
       () => dispatch({ type: 'tick', now: performance.now() }),
       TICK_MS,
     );
     return () => window.clearInterval(id);
-  }, [speed, pendingEventId]);
+  }, [speed]);
 
   // The Directorate alert pauses the clock only long enough to be read, then
   // resumes on its own — no player action required, unlike every other
@@ -156,7 +156,6 @@ export default function App() {
           <SpeedControls
             speed={speed}
             locked={
-              Boolean(pendingEventId) ||
               Boolean(pendingCombat) ||
               Boolean(pendingOccupation) ||
               Boolean(pendingDirectorateAlert) ||
@@ -299,15 +298,17 @@ export default function App() {
           <button className="secondary" onClick={restart}>
             Restart
           </button>
-          {(pendingEventId || pendingCombat || pendingOccupation || pendingDirectorateCombat) && (
+          {(pendingCombat || pendingOccupation || pendingDirectorateCombat) && (
             <p className="quiet">
               Clock paused. Resolve the pending{' '}
-              {pendingEventId
-                ? 'decision'
-                : pendingCombat || pendingDirectorateCombat
-                  ? 'combat'
-                  : 'occupation decision'}{' '}
-              to resume.
+              {pendingCombat || pendingDirectorateCombat ? 'combat' : 'occupation decision'} to
+              resume.
+            </p>
+          )}
+          {pendingEventId && !pendingCombat && !pendingOccupation && !pendingDirectorateCombat && (
+            <p className="quiet">
+              A decision is pending. The clock keeps running at 1x or slower — resolve it whenever
+              you're ready.
             </p>
           )}
         </div>

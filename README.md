@@ -23,8 +23,8 @@ npm run preview  # serve the production build
 ## The clock
 
 At 1x, **one real minute is one in game day**. Speed multiplies that directly,
-so 5x is five in game days per real minute. Speeds are paused, 1x, 2x, 3x, 4x
-and 5x, selectable at any time from the status bar.
+so 20x is twenty game days per real minute. Speeds are paused, 1x, 5x, 10x and
+20x, selectable at any time from the status bar.
 
 The loop never counts its own ticks. A 100ms interval reports the wall clock,
 the reducer takes the real milliseconds since the last settled moment, and
@@ -35,9 +35,14 @@ the interval it lands in is neither lost nor counted twice.
 
 Whole days are then walked one at a time so daily upkeep, delayed effects,
 fleet arrivals and event thresholds land in order even when a single long tick
-spans several days. An event stops that walk: the clock clamps to exactly that
-day and the speed drops to paused, so no in game time runs past a decision the
-player has not made. Speeds other than paused are disabled until it is resolved.
+spans several days. A political or narrative decision event no longer stops
+that walk: it drops the speed to 1x if it was running faster, but the clock
+keeps ticking with the panel open, and the player is free to pick any speed,
+including pausing manually, while it's unresolved — the drop is a one-time
+floor, not a lock. Combat arriving (either side) and an occupation decision
+are the exception: those still clamp the walk to that exact day and force the
+speed to paused, with every other speed disabled until resolved, since they
+represent an active engagement rather than a background decision.
 
 ## The screen
 
@@ -58,7 +63,8 @@ blue, Directorate red, contested amber). Clicking a node opens its side panel.
 
 A node with a pending decision gets a marker, and a hint bar appears whenever
 that decision is off screen (wrong system selected, or the right system open on
-another tab) so a paused clock always has a visible cause.
+another tab) so a running-but-slowed or paused clock always has a visible
+cause.
 
 Six systems in total: Sol (the capital) and Anchorage (a forward naval
 station) started Republic; New Virginia started Directorate held, per the
@@ -168,11 +174,12 @@ actually changes as battles are fought lives in `GameSession.garrisons`
 fixed data versus a fleet's live composition.
 
 When a fleet's travel countdown reaches zero and its destination is
-Directorate or contested, arrival does not complete. The clock pauses (the
-same as any decision event; every speed but Paused is disabled) and a Combat
-Orders panel opens in that system's Military tab, showing the attacking
-fleet's composition and strength side by side with the defending garrison's
-strength, followed by a stance choice — see Combat stances below.
+Directorate or contested, arrival does not complete. The clock hard pauses
+(every speed but Paused is disabled, unlike the softer drop a decision event
+causes) and a Combat Orders panel opens in that system's Military tab, showing
+the attacking fleet's composition and strength side by side with the
+defending garrison's strength, followed by a stance choice — see Combat
+stances below.
 
 On commit (`src/game/combat.ts` and `src/game/stance.ts`), both sides roll
 their strength with variance and whichever total is higher wins. Both sides
@@ -317,8 +324,9 @@ A sixth tab, Focus, carries a single linear path of eleven National Focuses
 one can be underway at a time, and starting one deducts its `leadershipCost`
 immediately and begins a day based countdown using the exact same absolute
 `completesOnDay` / `settleDueWork` mechanism as fleet transit and ship
-construction — it does not pause the clock, unlike a pending event, combat or
-occupation decision. `GameSession.activeFocus` (the one in progress, or
+construction — it never pauses the clock at all, unlike combat or an
+occupation decision (a pending event only slows it). `GameSession.activeFocus`
+(the one in progress, or
 `null`) and `completedFocusIds` (finished ones, in path order) are the two
 new live fields; the next startable focus is always the one at
 `completedFocusIds.length` in `FOCUS_PATH`.
@@ -391,9 +399,10 @@ targets, never guaranteed ones.
 The decision doesn't resolve immediately. An intelligence alert — sourced to
 the deliberately generic "Naval Intelligence" rather than an invented agency
 name — logs the target and a random 3 to 7 day estimated arrival, and
-briefly pauses the clock (the same `speed: 0` mechanism a scripted event
-uses) so it's impossible to miss even at 5x. Unlike every other pending
-state, nothing needs to be dismissed: a timer in `App.tsx` acknowledges the
+briefly hard pauses the clock (the same `speed: 0` combat and occupation use,
+a stronger stop than the 1x floor a decision event causes) so it's impossible
+to miss even at 20x. Unlike every other pending state, nothing needs to be
+dismissed: a timer in `App.tsx` acknowledges the
 alert on its own a few seconds later and the clock resumes at whatever speed
 it was running before, mirrored by an "incoming" marker on the map that
 stays lit for the whole countdown. The countdown itself runs on the

@@ -50,10 +50,11 @@ import type {
 } from './types';
 
 /** At 1x, one real minute is one in game day. Speed multiplies that directly,
- *  so 5x is five in game days per real minute. */
+ *  so 20x is twenty game days per real minute, proportionally from the same
+ *  baseline. */
 export const MS_PER_GAME_DAY = 60_000;
 
-export const SPEEDS: Speed[] = [0, 1, 2, 3, 4, 5];
+export const SPEEDS: Speed[] = [0, 1, 5, 10, 20];
 
 /** Chance per day that an eligible random event fires. */
 const RANDOM_EVENT_CHANCE = 0.5;
@@ -318,13 +319,15 @@ function guaranteeSurvivor(
  * Advances the clock by `realMs` of wall time at the session's current speed.
  *
  * Whole days are walked one at a time so that daily upkeep, delayed effects,
- * fleet arrivals and event thresholds all land in order. An event stops the
- * walk: the clock is clamped to that day and the speed drops to paused, so no
- * in game time runs past a decision the player has not made yet.
+ * fleet arrivals and event thresholds all land in order. A political or
+ * narrative decision event only drops the speed to 1x (if it was higher) the
+ * moment it fires — the walk keeps going, unlike combat arriving or an
+ * occupation decision, which still stop it outright. Only one such decision
+ * event is ever pending at a time; the walk skips picking a new one for as
+ * long as one is still unresolved.
  */
 export function runClock(session: GameSession, realMs: number): GameSession {
   if (
-    session.pendingEventId ||
     session.pendingCombat ||
     session.pendingOccupation ||
     session.pendingDirectorateCombat ||
@@ -351,7 +354,10 @@ export function runClock(session: GameSession, realMs: number): GameSession {
   let directorateAttack = session.directorateAttack;
   let approvalCollapseStartDay = session.approvalCollapseStartDay;
   let days = session.state.daysElapsed;
-  let pendingEventId: string | null = null;
+  // Carried forward, not reset: a decision event no longer stops the walk
+  // outright, so a still-unresolved one must survive this call rather than
+  // being dropped the moment the clock ticks again.
+  let pendingEventId: string | null = session.pendingEventId;
   let pendingCombat: PendingCombat | null = null;
   let pendingDirectorateAlert: PendingDirectorateAlert | null = null;
   let pendingDirectorateCombat: PendingDirectorateCombat | null = null;
@@ -568,7 +574,10 @@ export function runClock(session: GameSession, realMs: number): GameSession {
         if (targetId) {
           const arrivalDays = rollDirectorateArrivalDays();
           directorateAttack = { systemId: targetId, arrivalDay: boundary + arrivalDays };
-          pendingDirectorateAlert = { systemId: targetId, resumeSpeed: session.speed };
+          // Resumes to whatever speed is in effect right now, not the speed
+          // the session started this call at — a decision event may have
+          // already dropped it to 1x earlier in this same walk.
+          pendingDirectorateAlert = { systemId: targetId, resumeSpeed: speed };
           log.push(
             `Day ${boundary} — ${NAVAL_INTELLIGENCE}: unidentified Directorate fleet movement ` +
               `detected. Estimated arrival at ${systemName(targetId)} in ${arrivalDays} days.`,
@@ -577,24 +586,32 @@ export function runClock(session: GameSession, realMs: number): GameSession {
       }
     }
 
-    const event = pickEventForDay(boundary, firedEventIds);
+    // Only one decision event is ever open at a time — skip picking a new
+    // one for as long as an earlier one (this walk or a prior tick) is still
+    // unresolved.
+    const event = pendingEventId ? undefined : pickEventForDay(boundary, firedEventIds);
     if (event) {
       pendingEventId = event.id;
       firedEventIds = [...firedEventIds, event.id];
-      log.push(`Day ${boundary} — Incoming dispatch: ${event.title}. Clock paused.`);
+      log.push(`Day ${boundary} — Incoming dispatch: ${event.title}.`);
+      // Drops to 1x so a fast-forwarded game doesn't blow past a decision
+      // unnoticed, but — unlike combat or an intelligence alert — never
+      // stops the walk: upkeep, fleets and everything else keep moving
+      // while the decision panel is open.
+      if (speed > 1) speed = 1;
     }
 
     // An intelligence alert pauses the clock only briefly (the UI resumes it
     // automatically), but it still shares the same break-the-walk mechanism
-    // a scripted event or combat arrival uses, so it always lands on a whole
-    // day boundary rather than mid-tick.
-    if (pendingDirectorateAlert || pendingEventId) {
+    // combat arrival uses, so it always lands on a whole day boundary rather
+    // than mid-tick.
+    if (pendingDirectorateAlert) {
       speed = 0;
       break;
     }
   }
 
-  if (!pendingEventId && !pendingCombat && !pendingDirectorateAlert && !pendingDirectorateCombat) {
+  if (!pendingCombat && !pendingDirectorateAlert && !pendingDirectorateCombat) {
     days = target;
     settleDueWork(days);
     if (pendingCombat || pendingDirectorateCombat) speed = 0;
@@ -653,8 +670,9 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
         session.lastTickAt === null ? session : runClock(session, action.now - session.lastTickAt);
       return {
         ...settled,
+        // A pending decision event no longer forces this to 0 — the player
+        // is free to pick any speed while it's open, same as normal play.
         speed:
-          settled.pendingEventId ||
           settled.pendingCombat ||
           settled.pendingOccupation ||
           settled.pendingDirectorateAlert ||
@@ -963,11 +981,12 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
     }
 
     case 'commitInvasion': {
-      // Only one thing is ever allowed to pause the game at a time; refusing
-      // here keeps that invariant even though nothing else currently calls
-      // this action while another is pending.
+      // Combat, an occupation choice, a Directorate alert or a Directorate
+      // attack still refuse this — those are true hard pauses. A pending
+      // decision event no longer does: invasion is a normal action, always
+      // available with troops aboard at a hostile system, whether or not a
+      // decision panel happens to be open at the same time.
       if (
-        session.pendingEventId ||
         session.pendingCombat ||
         session.pendingOccupation ||
         session.pendingDirectorateAlert ||
@@ -1087,15 +1106,14 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
 
     case 'acknowledgeDirectorateAlert': {
       if (!session.pendingDirectorateAlert) return session;
-      // A scripted event (or any other pending state) can land on the exact
-      // same day boundary as the alert; acknowledging the alert must not
-      // resume the clock out from under a decision still waiting on the
-      // player, so it only restores the prior speed when nothing else is.
+      // Combat, occupation or another Directorate attack can land on the
+      // exact same day boundary as the alert; acknowledging it must not
+      // resume the clock out from under one of those, so it only restores
+      // the prior speed when none of them is also pending. A decision event
+      // no longer counts here — it doesn't hard-pause, and resumeSpeed was
+      // already capped for it (if any) at the moment the alert fired.
       const stillPaused =
-        session.pendingEventId ||
-        session.pendingCombat ||
-        session.pendingOccupation ||
-        session.pendingDirectorateCombat;
+        session.pendingCombat || session.pendingOccupation || session.pendingDirectorateCombat;
       return {
         ...session,
         pendingDirectorateAlert: null,

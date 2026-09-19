@@ -3,7 +3,10 @@ import type { Speed } from '../game/types';
 
 interface Props {
   speed: Speed;
-  /** True while a decision is pending: the clock cannot run until it is made. */
+  /** True while combat, an occupation choice or a Directorate alert is
+   *  pending: the clock cannot run until it is resolved. A political or
+   *  narrative decision event no longer locks this — the clock keeps
+   *  running (at 1x or slower) while it's open. */
   locked: boolean;
   onChange: (speed: Speed) => void;
 }
