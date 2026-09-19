@@ -265,6 +265,8 @@ export default function App() {
           controllerOverrides={session.controllerOverrides}
           fleets={fleets}
           buildQueue={session.buildQueue}
+          trainingQueue={session.trainingQueue}
+          groundTroopPool={session.groundTroopPool}
           taxPolicy={taxPolicy}
           completedFocusIds={completedFocusIds}
           activeFocus={activeFocus}
@@ -279,6 +281,8 @@ export default function App() {
             dispatch({ type: 'mergeFleets', fleetIds, keepFleetId })
           }
           onBuildShip={(systemId, shipType) => dispatch({ type: 'buildShip', systemId, shipType })}
+          onTrainTroops={(systemId) => dispatch({ type: 'trainTroops', systemId })}
+          onLoadTroops={(fleetId) => dispatch({ type: 'loadTroops', fleetId })}
           onCommitAttack={(stance: CombatStance) => dispatch({ type: 'commitAttack', stance })}
           onCommitDirectorateDefense={(stance: CombatStance) =>
             dispatch({ type: 'commitDirectorateDefense', stance })

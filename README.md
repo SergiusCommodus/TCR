@@ -248,12 +248,31 @@ combat line.
 ## Ground invasion and occupation
 
 A third ship type, Transport (`src/game/ships.ts`): cost and build time
-between Escort and Cruiser, 0 combat strength, and a `groundTroopsCarried` of
-2 — the only ship type that adds to a fleet's separate `groundTroops` count
-rather than fighting. Each Directorate or contested system also carries a
-`groundDefense` baseline, distinct from its naval `garrisonStrength` — New
-Virginia 6, Shiloh 3 — tracked live in `GameSession.groundDefenses`, the same
-static/live split as everything else here.
+between Escort and Cruiser, 0 combat strength, and a `groundTroopCapacity` of
+2 — the only ship type that carries ground troops rather than fighting.
+Unlike Escort and Cruiser, completing one adds no troops by itself: it only
+raises the ceiling that `groundTroopCapacity` (`src/game/fleets.ts`) sums
+across a fleet's Transports, the amount Load Troops (below) can move
+aboard. Each
+Directorate or contested system also carries a `groundDefense` baseline,
+distinct from its naval `garrisonStrength` — New Virginia 6, Shiloh 3 —
+tracked live in `GameSession.groundDefenses`, the same static/live split as
+everything else here.
+
+Ground troops are trained directly, independent of Transports, the same
+general shape as ship construction but landing in a per system pool rather
+than joining a fleet: Sol's Military tab carries a Ground Troop Training
+section (enforced Sol only in the reducer too, not just the panel) that
+spends materiel and manpower (`TROOP_TRAINING` in `src/game/troops.ts`) on a
+day based order, the same absolute `completesOnDay` mechanism as everything
+else on the clock. Completing one adds a fixed batch of troops to
+`GameSession.groundTroopPool`, keyed by system id — troops sitting there,
+not yet aboard any fleet, shown in that system's Fleets section whenever the
+pool there is nonzero. Any stationed fleet with room (its
+`groundTroopCapacity` above its current `groundTroops`) at a system whose
+pool is nonzero gets a Load Troops button, moving `min(room, pool)` aboard —
+some or all of what's waiting, capped by capacity either way — and logging
+how many.
 
 Ground troops ride the same ships that take naval losses, so a fleet's
 `groundTroops` takes the identical proportional hit its composition does in
@@ -269,9 +288,11 @@ available whenever the player chooses, not a forced pause; naval combat
 already made the player commit to being there. Committing resolves troops
 against `groundDefense` with the exact same `rollCombat` naval combat uses,
 applying `applySurvivingShare` to both sides same as naval losses. A loss
-that leaves the fleet with 0 ground troops needs a fresh Transport to try
-again; one that leaves troops standing can simply retry, since a failed
-attempt still wears down the defense.
+that leaves the fleet with 0 ground troops needs a fresh trip home to train
+and load more before trying again (the Transports themselves usually
+survive; it's the troops they carried that are gone); one that leaves
+troops standing can simply retry, since a failed attempt still wears down
+the defense.
 
 A won invasion opens an Occupation Decision, pausing the clock like any
 other event: four choices in `src/game/occupation.ts` — Bombard, Enslave and
@@ -305,7 +326,10 @@ population already drift on), narrated as population converting into a
 form the war effort can spend. Transport is the one ship type that spends
 it: building one now costs `manpowerCost` (8) alongside `materielCost`, so
 the Shipyard's affordability check and button label cover both; Escort and
-Cruiser stay materiel only (`manpowerCost: 0`).
+Cruiser stay materiel only (`manpowerCost: 0`). Ground troop training
+spends it too (`TROOP_TRAINING.manpowerCost`, 15 per order), on the same
+read that raising and crewing formations is what manpower represents,
+whether they ride Transports or fill them out.
 
 The Political tab carries a standing Tax Policy control — Low, Standard,
 Wartime — visible whichever system you're looking at, since taxation is a
@@ -489,12 +513,14 @@ logic every other Restart button in the app already uses.
   pending event, a pending combat if a fleet has arrived at a hostile system
   and not yet been ordered to attack, a pending occupation if an invasion has
   just succeeded, a pending Directorate defend stance choice, queued delayed
-  effects, fleets, the build queue, current garrison and ground defense
-  strength per system, each system's live controller override, the standing
-  tax policy, National Focus progress (`completedFocusIds`, `activeFocus`),
-  the Directorate's own fleet strength, next check day, in-flight attack and
-  pending alert, the approval collapse tracker (`approvalCollapseStartDay`),
-  and `gameOver` once a win or loss condition has triggered.
+  effects, fleets, the ship build queue, the ground troop training queue
+  (`trainingQueue`) and pool (`groundTroopPool`, per system id), current
+  garrison and ground defense strength per system, each system's live
+  controller override, the standing tax policy, National Focus progress
+  (`completedFocusIds`, `activeFocus`), the Directorate's own fleet strength,
+  next check day, in-flight attack and pending alert, the approval collapse
+  tracker (`approvalCollapseStartDay`), and `gameOver` once a win or loss
+  condition has triggered.
 
 `Effects` deliberately excludes `daysElapsed`: time comes from the clock, never
 from a choice's deltas.
@@ -516,9 +542,13 @@ concerns. An event id missing from that map falls back to `'global'`.
 - `src/game/state.ts` — the clock, the reducer, upkeep, delayed effects, fleets.
 - `src/game/systems.ts` — systems, controllers, map positions, event scope.
 - `src/game/fleets.ts` — transit, naming and composition helpers shared by
-  the map and the panel.
+  the map and the panel, including `groundTroopCapacity`.
 - `src/game/travel.ts` — the per-pair travel time table and lane list.
-- `src/game/ships.ts` — ship type data: cost, build time and strength per type.
+- `src/game/ships.ts` — ship type data: cost, build time and strength per
+  type; Transport's `groundTroopCapacity` is carrying capacity only, no
+  longer troops granted on completion.
+- `src/game/troops.ts` — `TROOP_TRAINING`, the cost, time and batch size for
+  training ground troops directly, independent of Transports.
 - `src/game/combat.ts` — the pure combat roll: strength, variance, losses.
   Shared unchanged by naval combat and ground invasion; `variance` is now an
   optional parameter (default the original ±20%) so a stance can override it.

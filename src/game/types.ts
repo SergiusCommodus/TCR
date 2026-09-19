@@ -71,9 +71,11 @@ export interface Fleet {
   departureDay: number;
   arrivalDay: number;
   composition: ShipComposition;
-  /** Ground troops this fleet carries, added by completed Transports. Used
-   *  only for a ground invasion at a system this fleet has already won the
-   *  naval battle at — it plays no part in naval combat strength. */
+  /** Ground troops actually aboard this fleet, loaded from a system's
+   *  trained troop pool via Load Troops (see groundTroopPool below and
+   *  groundTroopCapacity in fleets.ts for the ceiling its Transports allow).
+   *  Used only for a ground invasion at a system this fleet has already won
+   *  the naval battle at — it plays no part in naval combat strength. */
   groundTroops: number;
 }
 
@@ -84,6 +86,15 @@ export interface BuildOrder {
   systemId: string;
   shipType: ShipType;
   /** Absolute day the ship joins a fleet, so it is drift free like transit. */
+  completesOnDay: number;
+}
+
+/** Ground troop training under way at a system, counting down on the same
+ *  day based clock as ship construction — see TROOP_TRAINING in troops.ts. */
+export interface TroopTrainingOrder {
+  id: string;
+  systemId: string;
+  /** Absolute day the trained troops join that system's pool. */
   completesOnDay: number;
 }
 
@@ -165,6 +176,14 @@ export interface GameSession {
   queued: QueuedEffects[];
   fleets: Fleet[];
   buildQueue: BuildOrder[];
+  /** Ground troop training orders under way, Sol only for now — see
+   *  TroopTrainingOrder and TROOP_TRAINING in troops.ts. */
+  trainingQueue: TroopTrainingOrder[];
+  /** Trained ground troops sitting at a system, not yet loaded onto any
+   *  fleet, keyed by system id. A system absent here has none. Drawn down by
+   *  Load Troops, which moves some into a stationed fleet's own groundTroops
+   *  up to its Transport carrying capacity. */
+  groundTroopPool: Record<string, number>;
   /** The ordinal to try first when a completed ship needs a new fleet; skips
    *  forward past any name already in use (First and Third are taken from the
    *  start), so it never has to be exactly sequential. */

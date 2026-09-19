@@ -23,12 +23,14 @@ import {
   applySurvivingShare,
   describeComposition,
   fleetStrength,
+  groundTroopCapacity,
   nextFleetName,
   sumComposition,
 } from './fleets';
 import { SHIP_TYPES } from './ships';
 import { STANCE_LABEL, resolveStanceCombat } from './stance';
 import { HOME_SYSTEM_ID, SYSTEMS, currentController, systemById, systemName } from './systems';
+import { TROOP_TRAINING } from './troops';
 import { nearestOtherSystem, travelDays } from './travel';
 import type { CombatStance } from './stance';
 import type { ShipComposition } from './types';
@@ -48,6 +50,7 @@ import type {
   ShipType,
   Speed,
   TaxPolicy,
+  TroopTrainingOrder,
 } from './types';
 
 /** At 1x, one real minute is one in game day. Speed multiplies that directly,
@@ -242,6 +245,8 @@ export function initialSession(): GameSession {
     queued: [],
     fleets: INITIAL_FLEETS,
     buildQueue: [],
+    trainingQueue: [],
+    groundTroopPool: {},
     nextFleetNumber: INITIAL_NEXT_FLEET_NUMBER,
     garrisons: initialGarrisons(),
     groundDefenses: initialGroundDefenses(),
@@ -345,6 +350,8 @@ export function runClock(session: GameSession, realMs: number): GameSession {
   let queued: QueuedEffects[] = session.queued;
   let fleets = session.fleets;
   let buildQueue: BuildOrder[] = session.buildQueue;
+  let trainingQueue: TroopTrainingOrder[] = session.trainingQueue;
+  let groundTroopPool = session.groundTroopPool;
   let nextFleetNumber = session.nextFleetNumber;
   let firedEventIds = session.firedEventIds;
   let activeFocus = session.activeFocus;
@@ -434,7 +441,6 @@ export function runClock(session: GameSession, realMs: number): GameSession {
                     ...fleet.composition,
                     [order.shipType]: fleet.composition[order.shipType] + 1,
                   },
-                  groundTroops: fleet.groundTroops + def.groundTroopsCarried,
                 }
               : fleet,
           );
@@ -458,7 +464,7 @@ export function runClock(session: GameSession, realMs: number): GameSession {
               departureDay: 0,
               arrivalDay: 0,
               composition,
-              groundTroops: def.groundTroopsCarried,
+              groundTroops: 0,
             },
           ];
           log.push(
@@ -466,6 +472,22 @@ export function runClock(session: GameSession, realMs: number): GameSession {
               `${systemName(order.systemId)}, forms ${formed.name}.`,
           );
         }
+      }
+    }
+
+    const dueTraining = trainingQueue.filter((order) => order.completesOnDay <= atDay);
+    if (dueTraining.length > 0) {
+      trainingQueue = trainingQueue.filter((order) => order.completesOnDay > atDay);
+      for (const order of dueTraining) {
+        groundTroopPool = {
+          ...groundTroopPool,
+          [order.systemId]: (groundTroopPool[order.systemId] ?? 0) + TROOP_TRAINING.count,
+        };
+        log.push(
+          `Day ${dayLabel(order.completesOnDay)} — Ground troop training complete at ` +
+            `${systemName(order.systemId)} (+${TROOP_TRAINING.count} troops stationed, not yet ` +
+            'loaded aboard any fleet).',
+        );
       }
     }
 
@@ -625,6 +647,8 @@ export function runClock(session: GameSession, realMs: number): GameSession {
     queued,
     fleets,
     buildQueue,
+    trainingQueue,
+    groundTroopPool,
     nextFleetNumber,
     firedEventIds,
     pendingEventId,
@@ -646,6 +670,8 @@ export type GameAction =
   | { type: 'assignFleet'; fleetId: string; destinationId: string }
   | { type: 'mergeFleets'; fleetIds: string[]; keepFleetId: string }
   | { type: 'buildShip'; systemId: string; shipType: ShipType }
+  | { type: 'trainTroops'; systemId: string }
+  | { type: 'loadTroops'; fleetId: string }
   | { type: 'commitAttack'; stance: CombatStance }
   | { type: 'commitDirectorateDefense'; stance: CombatStance }
   | { type: 'commitInvasion'; fleetId: string }
@@ -811,6 +837,69 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
         ...session,
         state: { ...applyEffects(session.state, cost), log },
         buildQueue: [...session.buildQueue, order],
+      };
+    }
+
+    case 'trainTroops': {
+      // Sol only, the same restriction and defensive re-check ship
+      // construction uses; enforced here too, not just by which system shows
+      // the button.
+      if (action.systemId !== HOME_SYSTEM_ID) return session;
+      if (
+        session.state.materiel < TROOP_TRAINING.materielCost ||
+        session.state.manpower < TROOP_TRAINING.manpowerCost
+      ) {
+        return session;
+      }
+
+      const days = session.state.daysElapsed;
+      const order: TroopTrainingOrder = {
+        id: `training-${Math.round(days * 1000)}-${session.trainingQueue.length}`,
+        systemId: action.systemId,
+        completesOnDay: days + TROOP_TRAINING.days,
+      };
+      const cost: Effects = {
+        materiel: -TROOP_TRAINING.materielCost,
+        manpower: -TROOP_TRAINING.manpowerCost,
+      };
+      const log = [
+        ...session.state.log,
+        `Day ${dayLabel(days)} — Ground troop training begun at ` +
+          `${systemName(action.systemId)} (${describeEffects(cost)}); complete in ` +
+          `${TROOP_TRAINING.days} days.`,
+      ];
+
+      return {
+        ...session,
+        state: { ...applyEffects(session.state, cost), log },
+        trainingQueue: [...session.trainingQueue, order],
+      };
+    }
+
+    case 'loadTroops': {
+      const fleet = session.fleets.find((f) => f.id === action.fleetId);
+      if (!fleet || !fleet.location) return session;
+
+      const capacity = groundTroopCapacity(fleet.composition);
+      const room = capacity - fleet.groundTroops;
+      const available = session.groundTroopPool[fleet.location] ?? 0;
+      const toLoad = Math.min(room, available);
+      if (toLoad <= 0) return session;
+
+      const days = session.state.daysElapsed;
+      const log = [
+        ...session.state.log,
+        `Day ${dayLabel(days)} — ${toLoad} ground troop${toLoad === 1 ? '' : 's'} ` +
+          `load${toLoad === 1 ? 's' : ''} aboard ${fleet.name} at ${systemName(fleet.location)}.`,
+      ];
+
+      return {
+        ...session,
+        state: { ...session.state, log },
+        fleets: session.fleets.map((f) =>
+          f.id === fleet.id ? { ...f, groundTroops: f.groundTroops + toLoad } : f,
+        ),
+        groundTroopPool: { ...session.groundTroopPool, [fleet.location]: available - toLoad },
       };
     }
 

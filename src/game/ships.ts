@@ -10,9 +10,12 @@ export interface ShipTypeDef {
   buildDays: number;
   /** Combat strength this ship contributes to its fleet's total. */
   strength: number;
-  /** Ground troops added to a fleet's groundTroops when this ship completes.
-   *  Zero for every type except Transport. */
-  groundTroopsCarried: number;
+  /** Ground troops one of this ship type can carry, contributing to its
+   *  fleet's total carrying capacity (see groundTroopCapacity in fleets.ts).
+   *  Purely capacity — it doesn't generate troops on its own; those come
+   *  from training (see troops.ts) and are loaded aboard separately via
+   *  Load Troops. Zero for every type except Transport. */
+  groundTroopCapacity: number;
   /** Deducted from manpower immediately when construction begins, alongside
    *  materielCost. Zero for Escort and Cruiser — manpower only matters for
    *  Transport, which is crewing troops rather than a warship. */
@@ -24,8 +27,10 @@ export interface ShipTypeDef {
  * times and strengths, kept as simple data so they're easy to retune later:
  * Escort is cheap, fast, and weak; Cruiser is costlier, slower, and strong;
  * Transport sits between the two in cost and build time, fights for neither
- * side (strength 0), and carries ground troops instead — crewing it also
- * costs manpower, unlike the other two.
+ * side (strength 0), and carries ground troops instead of fighting — trained
+ * separately (see troops.ts) and loaded aboard via Load Troops, up to the
+ * capacity its Transports provide. Crewing a Transport also costs manpower,
+ * unlike the other two.
  */
 export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
   escort: {
@@ -35,7 +40,7 @@ export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
     materielCost: 15,
     buildDays: 4,
     strength: 1,
-    groundTroopsCarried: 0,
+    groundTroopCapacity: 0,
     manpowerCost: 0,
   },
   cruiser: {
@@ -45,7 +50,7 @@ export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
     materielCost: 40,
     buildDays: 10,
     strength: 3,
-    groundTroopsCarried: 0,
+    groundTroopCapacity: 0,
     manpowerCost: 0,
   },
   transport: {
@@ -55,7 +60,7 @@ export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
     materielCost: 25,
     buildDays: 7,
     strength: 0,
-    groundTroopsCarried: 2,
+    groundTroopCapacity: 2,
     manpowerCost: 8,
   },
 };

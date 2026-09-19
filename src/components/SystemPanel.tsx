@@ -1,6 +1,13 @@
 import { DIRECTORATE_NAVAL_SHARE } from '../game/directorate';
 import { findEvent } from '../game/events';
-import { buildDaysOut, daysOut, daysUntil, describeComposition, fleetStrength } from '../game/fleets';
+import {
+  buildDaysOut,
+  daysOut,
+  daysUntil,
+  describeComposition,
+  fleetStrength,
+  groundTroopCapacity,
+} from '../game/fleets';
 import { FOCUS_PATH } from '../game/focuses';
 import { occupationEventFor } from '../game/occupation';
 import { SHIP_TYPE_LIST, SHIP_TYPES } from '../game/ships';
@@ -13,6 +20,7 @@ import {
   currentController,
   systemName,
 } from '../game/systems';
+import { TROOP_TRAINING } from '../game/troops';
 import { travelDays } from '../game/travel';
 import type { Controller, SystemDef } from '../game/systems';
 import type { CombatStance } from '../game/stance';
@@ -25,6 +33,7 @@ import type {
   PendingOccupation,
   ShipType,
   TaxPolicy,
+  TroopTrainingOrder,
 } from '../game/types';
 import DecisionCard from './DecisionCard';
 
@@ -53,6 +62,8 @@ interface Props {
   controllerOverrides: Record<string, Controller>;
   fleets: Fleet[];
   buildQueue: BuildOrder[];
+  trainingQueue: TroopTrainingOrder[];
+  groundTroopPool: Record<string, number>;
   taxPolicy: TaxPolicy;
   completedFocusIds: string[];
   activeFocus: ActiveFocus | null;
@@ -62,6 +73,8 @@ interface Props {
   onChoose: (choiceIndex: number) => void;
   onAssignFleet: (fleetId: string, destinationId: string) => void;
   onBuildShip: (systemId: string, shipType: ShipType) => void;
+  onTrainTroops: (systemId: string) => void;
+  onLoadTroops: (fleetId: string) => void;
   onCommitAttack: (stance: CombatStance) => void;
   onCommitDirectorateDefense: (stance: CombatStance) => void;
   onCommitInvasion: (fleetId: string) => void;
@@ -88,6 +101,8 @@ interface MilitaryProps {
   manpower: number;
   fleets: Fleet[];
   buildQueue: BuildOrder[];
+  trainingQueue: TroopTrainingOrder[];
+  groundTroopPool: Record<string, number>;
   completedFocusIds: string[];
   pendingCombat: PendingCombat | null;
   pendingDirectorateCombat: PendingDirectorateCombat | null;
@@ -97,6 +112,8 @@ interface MilitaryProps {
   isHostile: boolean;
   onAssignFleet: (fleetId: string, destinationId: string) => void;
   onBuildShip: (systemId: string, shipType: ShipType) => void;
+  onTrainTroops: (systemId: string) => void;
+  onLoadTroops: (fleetId: string) => void;
   onCommitAttack: (stance: CombatStance) => void;
   onCommitDirectorateDefense: (stance: CombatStance) => void;
   onCommitInvasion: (fleetId: string) => void;
@@ -217,6 +234,68 @@ function BuildPanel({
             return (
               <p key={order.id} className="quiet">
                 {def.name}, {remaining} day{remaining === 1 ? '' : 's'} remaining.
+              </p>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function TroopTrainingPanel({
+  system,
+  daysElapsed,
+  materiel,
+  manpower,
+  trainingQueue,
+  groundTroopPool,
+  onTrainTroops,
+}: {
+  system: SystemDef;
+  daysElapsed: number;
+  materiel: number;
+  manpower: number;
+  trainingQueue: TroopTrainingOrder[];
+  groundTroopPool: Record<string, number>;
+  onTrainTroops: (systemId: string) => void;
+}) {
+  const queueHere = trainingQueue.filter((order) => order.systemId === system.id);
+  const stationed = groundTroopPool[system.id] ?? 0;
+  const affordable = materiel >= TROOP_TRAINING.materielCost && manpower >= TROOP_TRAINING.manpowerCost;
+
+  return (
+    <section className="tab-section">
+      <h4>Ground Troop Training</h4>
+      <p className="quiet">
+        Trains directly from manpower and materiel, independent of Transport ships — those only
+        carry troops once trained, via Load Troops below.
+      </p>
+      {stationed > 0 && (
+        <p className="quiet">
+          {stationed} ground troop{stationed === 1 ? '' : 's'} stationed here, awaiting Load Troops.
+        </p>
+      )}
+      <div className="fleet-buttons">
+        <button
+          className="ghost"
+          disabled={!affordable}
+          title={affordable ? undefined : 'Not enough materiel or manpower'}
+          onClick={() => onTrainTroops(system.id)}
+        >
+          Train {TROOP_TRAINING.count} Troops · {TROOP_TRAINING.materielCost} materiel,{' '}
+          {TROOP_TRAINING.manpowerCost} manpower, {TROOP_TRAINING.days}d
+        </button>
+      </div>
+
+      {queueHere.length > 0 && (
+        <div className="build-queue">
+          <p className="quiet">In training:</p>
+          {queueHere.map((order) => {
+            const remaining = daysUntil(order.completesOnDay, daysElapsed);
+            return (
+              <p key={order.id} className="quiet">
+                {TROOP_TRAINING.count} troops, {remaining} day{remaining === 1 ? '' : 's'} remaining.
               </p>
             );
           })}
@@ -347,6 +426,8 @@ function MilitaryTab({
   manpower,
   fleets,
   buildQueue,
+  trainingQueue,
+  groundTroopPool,
   completedFocusIds,
   pendingCombat,
   pendingDirectorateCombat,
@@ -356,6 +437,8 @@ function MilitaryTab({
   isHostile,
   onAssignFleet,
   onBuildShip,
+  onTrainTroops,
+  onLoadTroops,
   onCommitAttack,
   onCommitDirectorateDefense,
   onCommitInvasion,
@@ -369,6 +452,7 @@ function MilitaryTab({
   const combatFleet = pendingCombat ? fleets.find((f) => f.id === pendingCombat.fleetId) : undefined;
   const directorateCombatHere = pendingDirectorateCombat?.systemId === system.id;
   const defendingStrengthHere = stationed.reduce((sum, f) => sum + fleetStrength(f.composition), 0);
+  const troopPoolHere = groundTroopPool[system.id] ?? 0;
 
   return (
     <>
@@ -413,6 +497,18 @@ function MilitaryTab({
         />
       )}
 
+      {system.id === HOME_SYSTEM_ID && (
+        <TroopTrainingPanel
+          system={system}
+          daysElapsed={daysElapsed}
+          materiel={materiel}
+          manpower={manpower}
+          trainingQueue={trainingQueue}
+          groundTroopPool={groundTroopPool}
+          onTrainTroops={onTrainTroops}
+        />
+      )}
+
       <section className="tab-section">
         <h4>Fleets</h4>
         {stationed.length === 0 && transiting.length === 0 && (
@@ -434,17 +530,27 @@ function MilitaryTab({
           );
         })}
 
-        {stationed.map((fleet) => (
+        {stationed.map((fleet) => {
+          const capacity = groundTroopCapacity(fleet.composition);
+          const room = capacity - fleet.groundTroops;
+          const toLoad = Math.min(room, troopPoolHere);
+          return (
           <div key={fleet.id} className="fleet-order">
             <p className="fleet-name">{fleet.name} — stationed</p>
             <p className="quiet">{describeComposition(fleet.composition)}</p>
 
-            {isHostile && (
+            {capacity > 0 && (
               <p className="quiet">
-                {fleet.groundTroops > 0
-                  ? `${fleet.groundTroops} ground troops aboard.`
-                  : 'No ground troops aboard.'}
+                {fleet.groundTroops} of {capacity} ground troop capacity loaded.
               </p>
+            )}
+
+            {toLoad > 0 && (
+              <div className="fleet-buttons">
+                <button className="ghost" onClick={() => onLoadTroops(fleet.id)}>
+                  Load Troops · +{toLoad}
+                </button>
+              </div>
             )}
 
             {isHostile && fleet.groundTroops > 0 && (
@@ -490,7 +596,8 @@ function MilitaryTab({
               ))}
             </div>
           </div>
-        ))}
+          );
+        })}
       </section>
     </>
   );
@@ -511,6 +618,8 @@ export default function SystemPanel({
   controllerOverrides,
   fleets,
   buildQueue,
+  trainingQueue,
+  groundTroopPool,
   taxPolicy,
   completedFocusIds,
   activeFocus,
@@ -520,6 +629,8 @@ export default function SystemPanel({
   onChoose,
   onAssignFleet,
   onBuildShip,
+  onTrainTroops,
+  onLoadTroops,
   onCommitAttack,
   onCommitDirectorateDefense,
   onCommitInvasion,
@@ -574,6 +685,8 @@ export default function SystemPanel({
             manpower={manpower}
             fleets={fleets}
             buildQueue={buildQueue}
+            trainingQueue={trainingQueue}
+            groundTroopPool={groundTroopPool}
             completedFocusIds={completedFocusIds}
             pendingCombat={pendingCombat}
             pendingDirectorateCombat={pendingDirectorateCombat}
@@ -583,6 +696,8 @@ export default function SystemPanel({
             isHostile={isHostile}
             onAssignFleet={onAssignFleet}
             onBuildShip={onBuildShip}
+            onTrainTroops={onTrainTroops}
+            onLoadTroops={onLoadTroops}
             onCommitAttack={onCommitAttack}
             onCommitDirectorateDefense={onCommitDirectorateDefense}
             onCommitInvasion={onCommitInvasion}

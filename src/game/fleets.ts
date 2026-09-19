@@ -100,6 +100,13 @@ export function fleetStrength(composition: ShipComposition): number {
   );
 }
 
+/** How many ground troops a fleet's Transports can carry in total — the
+ *  ceiling Load Troops fills up to, not how many are actually aboard right
+ *  now (that's the fleet's own groundTroops). */
+export function groundTroopCapacity(composition: ShipComposition): number {
+  return composition.transport * SHIP_TYPES.transport.groundTroopCapacity;
+}
+
 /** Reduces a plain count by a loss fraction (0 = untouched, 1 = wiped out),
  *  rounded to a whole number and never negative. Shared by ship counts,
  *  garrison and ground defense strength, and ground troops — anything
