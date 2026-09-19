@@ -143,6 +143,16 @@ map, in the Military tab, and on the in transit marker — the shape combat
 resolution will need next, already in place even though nothing consumes it
 yet.
 
+Whenever two or more fleets are stationed at the same system, each one's card
+in the Military tab gets a "Merge N fleets into `<name>`" button — the player
+picks which fleet's name and id survive by which button they click. Merging
+(`mergeFleets` in `src/game/state.ts`) sums every stationed fleet's
+composition and ground troops (`sumComposition` in `src/game/fleets.ts`) into
+the chosen survivor and retires the rest, logging who absorbed whom and the
+resulting composition. Guarded defensively against fewer than two fleets, a
+survivor not actually stationed there, or fleets spread across more than one
+system; any of those leaves the fleet list untouched.
+
 ## Ship construction
 
 The Military tab shows a Shipyard section only when Sol is selected —

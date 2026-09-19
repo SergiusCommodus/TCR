@@ -24,6 +24,7 @@ import {
   describeComposition,
   fleetStrength,
   nextFleetName,
+  sumComposition,
 } from './fleets';
 import { SHIP_TYPES } from './ships';
 import { STANCE_LABEL, resolveStanceCombat } from './stance';
@@ -643,6 +644,7 @@ export function runClock(session: GameSession, realMs: number): GameSession {
 export type GameAction =
   | { type: 'choose'; choiceIndex: number }
   | { type: 'assignFleet'; fleetId: string; destinationId: string }
+  | { type: 'mergeFleets'; fleetIds: string[]; keepFleetId: string }
   | { type: 'buildShip'; systemId: string; shipType: ShipType }
   | { type: 'commitAttack'; stance: CombatStance }
   | { type: 'commitDirectorateDefense'; stance: CombatStance }
@@ -743,6 +745,35 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
             : f,
         ),
       };
+    }
+
+    case 'mergeFleets': {
+      const targets = session.fleets.filter((f) => action.fleetIds.includes(f.id));
+      const survivor = targets.find((f) => f.id === action.keepFleetId);
+      // Two or more, all stationed together at the same system — merging a
+      // fleet in transit, or ones at different systems, makes no sense.
+      if (targets.length < 2 || !survivor || !survivor.location) return session;
+      if (targets.some((f) => f.location !== survivor.location)) return session;
+
+      const composition = sumComposition(targets);
+      const groundTroops = targets.reduce((sum, f) => sum + f.groundTroops, 0);
+      const absorbed = targets.filter((f) => f.id !== survivor.id);
+
+      const days = session.state.daysElapsed;
+      const log = [
+        ...session.state.log,
+        `Day ${dayLabel(days)} — ${survivor.name} absorbs ${absorbed.map((f) => f.name).join(', ')} ` +
+          `at ${systemName(survivor.location)}, forming a combined fleet of ` +
+          `${describeComposition(composition)}` +
+          (groundTroops > 0 ? ` with ${groundTroops} ground troops aboard` : '') +
+          '.',
+      ];
+
+      const fleets = session.fleets
+        .filter((f) => !absorbed.some((a) => a.id === f.id))
+        .map((f) => (f.id === survivor.id ? { ...f, composition, groundTroops } : f));
+
+      return { ...session, state: { ...session.state, log }, fleets };
     }
 
     case 'buildShip': {

@@ -275,6 +275,9 @@ export default function App() {
           onAssignFleet={(fleetId, destinationId) =>
             dispatch({ type: 'assignFleet', fleetId, destinationId })
           }
+          onMergeFleets={(fleetIds, keepFleetId) =>
+            dispatch({ type: 'mergeFleets', fleetIds, keepFleetId })
+          }
           onBuildShip={(systemId, shipType) => dispatch({ type: 'buildShip', systemId, shipType })}
           onCommitAttack={(stance: CombatStance) => dispatch({ type: 'commitAttack', stance })}
           onCommitDirectorateDefense={(stance: CombatStance) =>

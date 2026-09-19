@@ -68,6 +68,7 @@ interface Props {
   onCommitOccupation: (choiceIndex: number) => void;
   onSetTaxPolicy: (policy: TaxPolicy) => void;
   onStartFocus: (focusId: string) => void;
+  onMergeFleets: (fleetIds: string[], keepFleetId: string) => void;
 }
 
 function Placeholder({ title, children }: { title: string; children: string }) {
@@ -99,6 +100,7 @@ interface MilitaryProps {
   onCommitAttack: (stance: CombatStance) => void;
   onCommitDirectorateDefense: (stance: CombatStance) => void;
   onCommitInvasion: (fleetId: string) => void;
+  onMergeFleets: (fleetIds: string[], keepFleetId: string) => void;
 }
 
 /**
@@ -357,6 +359,7 @@ function MilitaryTab({
   onCommitAttack,
   onCommitDirectorateDefense,
   onCommitInvasion,
+  onMergeFleets,
 }: MilitaryProps) {
   const stationed = fleets.filter((f) => f.location === system.id);
   // Fleets that departed from this system and are currently between here and
@@ -458,6 +461,22 @@ function MilitaryTab({
               </p>
             )}
 
+            {stationed.length > 1 && (
+              <div className="fleet-buttons">
+                <button
+                  className="ghost merge"
+                  onClick={() =>
+                    onMergeFleets(
+                      stationed.map((s) => s.id),
+                      fleet.id,
+                    )
+                  }
+                >
+                  Merge {stationed.length} fleets into {fleet.name}
+                </button>
+              </div>
+            )}
+
             <p className="quiet">Assign a destination:</p>
             <div className="fleet-buttons">
               {destinations.map((target) => (
@@ -507,6 +526,7 @@ export default function SystemPanel({
   onCommitOccupation,
   onSetTaxPolicy,
   onStartFocus,
+  onMergeFleets,
 }: Props) {
   const event = pendingEventId ? findEvent(pendingEventId) : undefined;
   const controller = currentController(system, controllerOverrides);
@@ -566,6 +586,7 @@ export default function SystemPanel({
             onCommitAttack={onCommitAttack}
             onCommitDirectorateDefense={onCommitDirectorateDefense}
             onCommitInvasion={onCommitInvasion}
+            onMergeFleets={onMergeFleets}
           />
         )}
 

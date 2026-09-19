@@ -866,6 +866,15 @@ button.ghost.invade:hover {
   background: var(--directorate-dim);
 }
 
+button.ghost.merge {
+  border-color: var(--contested);
+  color: var(--contested);
+}
+
+button.ghost.merge:hover {
+  background: var(--contested-dim);
+}
+
 .actions button:disabled {
   background: transparent;
   color: var(--muted);
