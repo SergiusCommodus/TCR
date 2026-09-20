@@ -1023,6 +1023,12 @@ button.ghost.merge:hover {
   color: var(--muted);
 }
 
+.end-actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.6rem;
+}
+
 .end-restart {
   font: inherit;
   font-weight: 600;
@@ -1036,4 +1042,15 @@ button.ghost.merge:hover {
 
 .end-restart:hover {
   filter: brightness(1.1);
+}
+
+.end-restart.end-secondary {
+  background: transparent;
+  color: var(--ink);
+  border-color: var(--line-bright);
+  font-weight: 400;
+}
+
+.end-actions + .quiet {
+  margin-top: 1rem;
 }

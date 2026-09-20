@@ -7,14 +7,22 @@ import SystemPanel from './components/SystemPanel';
 import type { Tab } from './components/SystemPanel';
 import { NAVAL_INTELLIGENCE } from './game/directorate';
 import { findEvent } from './game/events';
-import { dayLabel, initialSession, reducer } from './game/state';
+import { dayLabel, deserializeSession, initialSession, reducer, serializeSession } from './game/state';
 import { HOME_SYSTEM_ID, SYSTEMS, scopeOf, systemById, systemName } from './game/systems';
 import type { CombatStance } from './game/stance';
-import type { Speed } from './game/types';
+import type { GameSession, Speed } from './game/types';
 
 /** How often the clock is settled against the wall clock. Elapsed real time is
  *  measured each time, so the interval's own jitter cannot accumulate. */
 const TICK_MS = 100;
+
+/** The single save slot's key in localStorage — one slot, overwritten each
+ *  time, not a list of named saves. */
+const SAVE_KEY = 'tcr-save';
+
+/** How long a save/load status message ("Saved.", "No saved game found.")
+ *  stays on screen before clearing itself. */
+const SAVE_STATUS_MS = 4000;
 
 /** The system a pending event belongs to, or null when it is national in scope. */
 function pendingSystemOf(pendingEventId: string | null): string | null {
@@ -50,6 +58,7 @@ export default function App() {
     () => pendingSystemOf(session.pendingEventId) ?? HOME_SYSTEM_ID,
   );
   const [tab, setTab] = useState<Tab>('Political');
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
 
   const selected = systemById(selectedId) ?? SYSTEMS[0];
   /** A system decision is only on screen when its system is open on the Political tab. */
@@ -94,6 +103,12 @@ export default function App() {
     return () => window.clearTimeout(id);
   }, [pendingDirectorateAlert]);
 
+  useEffect(() => {
+    if (!saveStatus) return;
+    const id = window.setTimeout(() => setSaveStatus(null), SAVE_STATUS_MS);
+    return () => window.clearTimeout(id);
+  }, [saveStatus]);
+
   const setSpeed = (next: Speed) =>
     dispatch({ type: 'setSpeed', speed: next, now: performance.now() });
 
@@ -127,8 +142,51 @@ export default function App() {
     setTab('Political');
   };
 
+  /** Points the map/panel selection at whatever the just-loaded session has
+   *  pending, the same landing spot a fresh game gets, rather than leaving
+   *  it on whatever system happened to be selected before the load. */
+  const selectForLoadedSession = (loaded: GameSession) => {
+    setSelectedId(pendingSystemOf(loaded.pendingEventId) ?? HOME_SYSTEM_ID);
+    setTab('Political');
+  };
+
+  const saveGame = () => {
+    try {
+      window.localStorage.setItem(SAVE_KEY, serializeSession(session));
+      setSaveStatus(`Saved at Day ${dayLabel(state.daysElapsed)}.`);
+    } catch {
+      // Quota exceeded, storage disabled by the browser, etc. — nothing the
+      // player can fix mid-game, just say so rather than crash.
+      setSaveStatus('Could not save — browser storage is unavailable.');
+    }
+  };
+
+  const loadGame = () => {
+    let raw: string | null;
+    try {
+      raw = window.localStorage.getItem(SAVE_KEY);
+    } catch {
+      setSaveStatus('Could not read a saved game — browser storage is unavailable.');
+      return;
+    }
+    if (!raw) {
+      setSaveStatus('No saved game found.');
+      return;
+    }
+    const loaded = deserializeSession(raw);
+    if (!loaded) {
+      setSaveStatus('Save data is invalid or from an incompatible version.');
+      return;
+    }
+    dispatch({ type: 'load', session: loaded });
+    selectForLoadedSession(loaded);
+    setSaveStatus(`Loaded save from Day ${dayLabel(loaded.state.daysElapsed)}.`);
+  };
+
   if (gameOver) {
-    return <EndScreen gameOver={gameOver} onRestart={restart} />;
+    return (
+      <EndScreen gameOver={gameOver} onRestart={restart} onLoad={loadGame} saveStatus={saveStatus} />
+    );
   }
 
   return (
@@ -300,9 +358,20 @@ export default function App() {
           ))}
         </div>
         <div className="actions">
+          <button className="secondary" onClick={saveGame}>
+            Save Game
+          </button>
+          <button className="secondary" onClick={loadGame}>
+            Load Game
+          </button>
           <button className="secondary" onClick={restart}>
             Restart
           </button>
+          {saveStatus && (
+            <p className="quiet" role="status">
+              {saveStatus}
+            </p>
+          )}
           {pendingOccupation && (
             <p className="quiet">Clock paused. Resolve the pending occupation decision to resume.</p>
           )}

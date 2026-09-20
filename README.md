@@ -519,15 +519,63 @@ controlled at once is a victory. The wrapper (`reducer` in `src/game/state.ts`,
 with the original switch statement renamed `reducerCore` underneath it) sets
 `GameSession.gameOver`, forces `speed: 0`, and appends a `Victory:`/`Defeat:`
 log line the moment any of these trips — and once `gameOver` is set, every
-action but `reset` is refused outright, so nothing else can ever process
-again: no further ticks, no events, no AI decisions.
+action but `reset` or `load` is refused outright, so nothing else can ever
+process again: no further ticks, no events, no AI decisions, short of
+starting over or loading a different game entirely.
 
 `EndScreen.tsx` replaces the entire main view the instant `gameOver` is set
 (`App.tsx` checks it before rendering anything else): which of Victory or
 Defeat, the exact narrated reason (naming Sol by name for that defeat,
 "fully repelled" for the win, the internal collapse framing for the other
-two), the final day count, and a Restart button wired to the same restart
-logic every other Restart button in the app already uses.
+two), the final day count, and Restart and Load Game buttons — Restart wired
+to the same restart logic every other Restart button in the app already
+uses, Load Game the same load path described below, since an ended game is
+exactly the kind of dead end a save from before it should be able to escape.
+
+## Save and load
+
+A single save slot, kept in the browser's `localStorage` under the key
+`tcr-save` — no backend, no file picker, just Save Game and Load Game
+buttons in the footer (and, on the end screen, a Load Game button next to
+Restart, since a finished game is otherwise a dead end). Saving and loading
+are plain reducer actions and pure functions, not something wired around the
+reducer, so they get the same guarantees every other state change does.
+
+`serializeSession` (`src/game/state.ts`) writes the entire `GameSession` —
+`state`, every fleet (stationed or in transit), the build and training
+queues, garrisons and ground defenses, controller overrides, the Directorate's
+own fleet strength and any in-flight attack, National Focus progress, the
+active and queued panels, `speed`, all of it — as JSON, wrapped with a
+`SAVE_VERSION` number: `{ version, session }`. `lastTickAt` is cleared to
+`null` before writing, since it is a wall clock reading tied to the saving
+tab's own `performance.now()` origin and means nothing once written down or
+reloaded elsewhere.
+
+`deserializeSession` is the reverse, and refuses to load anything it isn't
+certain about rather than risk a half-broken session: invalid JSON, a
+missing or mismatched `version` (bumped whenever `GameSession`'s shape
+changes), or a session that fails `isValidSession`'s structural check (every
+field a load actually reads present and the right JS type) all come back
+`null`. On success, `lastTickAt` is set back to `null` in the returned
+session — the next tick just calibrates a fresh baseline against the current
+wall clock instead of jumping the day count by however long ago the save
+happened to be written.
+
+Loading dispatches a `load` action carrying the already-deserialized session;
+`reducerCore` treats it as a wholesale replace, the same way `reset` swaps in
+a fresh `initialSession()`, and the public `reducer` wrapper lets `load`
+through even when `gameOver` is set — the one other exception to that lock,
+alongside `reset`. Speed and `queuedPanels` come back exactly as saved, so
+the clock resumes ticking at whatever speed was selected and however many
+panels were queued the moment it was saved, with no extra step to "resume"
+anything: the existing speed-driven tick interval in `App.tsx` just keeps
+running once a `speed` above 0 comes back in.
+
+Save and load both leave a short status line in the footer (a `<p
+role="status">`, cleared automatically after a few seconds) — "Saved at Day
+N.", "Loaded save from Day N.", "No saved game found." if the slot is empty,
+or a message naming the problem if the saved data doesn't parse or validate
+— so success and failure are both visible without a native browser dialog.
 
 ## Data model
 
@@ -572,7 +620,8 @@ concerns. An event id missing from that map falls back to `'global'`.
 ## Files
 
 - `src/game/events.ts` — event content.
-- `src/game/state.ts` — the clock, the reducer, upkeep, delayed effects, fleets.
+- `src/game/state.ts` — the clock, the reducer, upkeep, delayed effects,
+  fleets, and `serializeSession`/`deserializeSession` for save and load.
 - `src/game/systems.ts` — systems, controllers, map positions, event scope.
 - `src/game/fleets.ts` — transit, naming and composition helpers shared by
   the map and the panel, including `groundTroopCapacity`.

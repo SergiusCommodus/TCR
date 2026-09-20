@@ -266,6 +266,88 @@ export function initialSession(): GameSession {
   };
 }
 
+/** Bumped whenever GameSession's shape changes in a way an older save can't
+ *  be trusted to match; a save written under a different version is refused
+ *  outright rather than loaded partially or guessed at. */
+export const SAVE_VERSION = 1;
+
+interface SaveFile {
+  version: number;
+  session: GameSession;
+}
+
+/** True if `value` looks enough like a GameSession to load safely — every
+ *  field a load actually reads is present and the right JS type. Not a full
+ *  schema check (nested shapes like Fleet or Effects are trusted once their
+ *  containing array/record checks out), just enough to refuse a corrupted
+ *  file, a save from a different version, or the JSON of some other object
+ *  entirely, rather than crash partway through rendering it. */
+function isValidSession(value: unknown): value is GameSession {
+  if (!value || typeof value !== 'object') return false;
+  const s = value as Record<string, unknown>;
+
+  const st = s.state as Record<string, unknown> | undefined;
+  if (!st || typeof st !== 'object') return false;
+  const stateFieldsOk = ['daysElapsed', 'materiel', 'population', 'approval', 'leadershipPoints', 'manpower']
+    .every((key) => typeof st[key] === 'number');
+  if (!stateFieldsOk || !Array.isArray(st.log)) return false;
+
+  if (!SPEEDS.includes(s.speed as Speed)) return false;
+  if (s.lastTickAt !== null && typeof s.lastTickAt !== 'number') return false;
+  if (!TAX_POLICIES.includes(s.taxPolicy as TaxPolicy)) return false;
+
+  const arrayFields = [
+    'firedEventIds', 'queued', 'fleets', 'buildQueue', 'trainingQueue',
+    'completedFocusIds', 'queuedPanels',
+  ];
+  if (!arrayFields.every((key) => Array.isArray(s[key]))) return false;
+
+  const objectFields = ['groundTroopPool', 'garrisons', 'groundDefenses', 'controllerOverrides'];
+  if (!objectFields.every((key) => s[key] !== null && typeof s[key] === 'object')) return false;
+
+  const numberFields = [
+    'nextFleetNumber', 'directorateFleetStrength', 'directorateNextCheckDay',
+  ];
+  if (!numberFields.every((key) => typeof s[key] === 'number')) return false;
+
+  return true;
+}
+
+/** Turns a session into a save file: JSON of `{ version, session }`, with
+ *  `lastTickAt` cleared first. It's a wall clock reading tied to the
+ *  `performance.now()` origin of the tab that saved it — meaningless once
+ *  reloaded into a different tab or a later day — so deserializeSession
+ *  would clear it right back to null anyway; clearing it here just keeps
+ *  the save file itself from carrying a number that never means anything
+ *  once written down. */
+export function serializeSession(session: GameSession): string {
+  const file: SaveFile = { version: SAVE_VERSION, session: { ...session, lastTickAt: null } };
+  return JSON.stringify(file);
+}
+
+/** The reverse of serializeSession: parses a save file, refusing anything
+ *  that isn't valid JSON, isn't shaped like a GameSession, or was written by
+ *  a different SAVE_VERSION, rather than loading it partway and leaving the
+ *  session in a broken state. `lastTickAt` always comes back null — the
+ *  first tick after loading just calibrates a new baseline against the
+ *  current wall clock rather than jumping the clock by however long ago the
+ *  save happened to be written. Speed and the panel queue come back exactly
+ *  as saved, so the clock resumes right where it left off once ticking
+ *  starts again. */
+export function deserializeSession(raw: string): GameSession | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const file = parsed as Record<string, unknown>;
+  if (file.version !== SAVE_VERSION) return null;
+  if (!isValidSession(file.session)) return null;
+  return { ...(file.session as GameSession), lastTickAt: null };
+}
+
 function pickEventForDay(day: number, firedEventIds: string[]): EventDef | undefined {
   const scripted = EVENTS.find((e) => e.dayTrigger === day && !firedEventIds.includes(e.id));
   if (scripted) return scripted;
@@ -732,6 +814,7 @@ export type GameAction =
   | { type: 'acknowledgeDirectorateAlert'; now: number }
   | { type: 'setSpeed'; speed: Speed; now: number }
   | { type: 'tick'; now: number }
+  | { type: 'load'; session: GameSession }
   | { type: 'reset' };
 
 function reducerCore(session: GameSession, action: GameAction): GameSession {
@@ -1281,6 +1364,13 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
       };
     }
 
+    case 'load':
+      // A wholesale replace, not a merge: the loaded session already fully
+      // describes the game, the same way 'reset' replaces it with a fresh
+      // one. The caller (deserializeSession) is trusted to have already
+      // validated the shape and cleared lastTickAt.
+      return action.session;
+
     case 'reset':
       return initialSession();
 
@@ -1313,10 +1403,11 @@ function applyGameEnd(session: GameSession): GameSession {
  * The public reducer: runs every action through reducerCore, then checks
  * win and lose conditions on the result, effectively continuously since
  * every dispatch (including the 100ms clock tick) passes through here.
- * Once gameOver is set, every action but 'reset' is a no-op — the clock is
- * paused immediately and permanently, and nothing else can process.
+ * Once gameOver is set, every action but 'reset' or 'load' is a no-op — the
+ * clock is paused immediately and permanently, and nothing else can
+ * process, except starting over or loading a different game entirely.
  */
 export function reducer(session: GameSession, action: GameAction): GameSession {
-  if (session.gameOver && action.type !== 'reset') return session;
+  if (session.gameOver && action.type !== 'reset' && action.type !== 'load') return session;
   return applyGameEnd(reducerCore(session, action));
 }
