@@ -7,6 +7,7 @@ import SystemPanel from './components/SystemPanel';
 import type { Tab } from './components/SystemPanel';
 import { NAVAL_INTELLIGENCE } from './game/directorate';
 import { findEvent } from './game/events';
+import { formatMoney, formatPopulation } from './game/scale';
 import { dayLabel, deserializeSession, initialSession, reducer, serializeSession } from './game/state';
 import { HOME_SYSTEM_ID, SYSTEMS, scopeOf, systemById, systemName } from './game/systems';
 import type { CombatStance } from './game/stance';
@@ -218,11 +219,11 @@ export default function App() {
         <dl className="briefing">
           <div>
             <dt>Materiel</dt>
-            <dd>{state.materiel}</dd>
+            <dd>{formatMoney(state.materiel)}</dd>
           </div>
           <div>
             <dt>Population</dt>
-            <dd>{state.population}</dd>
+            <dd>{formatPopulation(state.population)}</dd>
           </div>
           <div>
             <dt>Approval</dt>

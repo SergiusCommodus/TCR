@@ -1,3 +1,4 @@
+import { MAT_SCALE, POP_SCALE } from './scale';
 import type { EventDef } from './types';
 
 export const EVENTS: EventDef[] = [
@@ -12,14 +13,14 @@ export const EVENTS: EventDef[] = [
     choices: [
       {
         label: 'Declare full wartime mobilization',
-        effects: { materiel: -25, approval: 12, leadershipPoints: 3 },
+        effects: { materiel: -25 * MAT_SCALE, approval: 12, leadershipPoints: 3 },
         resultText:
           'Wartime mobilization is declared. Yards and foundries convert overnight, stockpiles ' +
           'are drawn down hard, and Congress grants you broad emergency latitude.',
       },
       {
         label: 'Measured response, avoid panic',
-        effects: { materiel: -6, approval: -4 },
+        effects: { materiel: -6 * MAT_SCALE, approval: -4 },
         resultText:
           'The Republic responds in measured steps. Markets stay calm; the public reads restraint ' +
           'as hesitation.',
@@ -44,7 +45,7 @@ export const EVENTS: EventDef[] = [
     choices: [
       {
         label: 'Push it through as planned',
-        effects: { materiel: -8, approval: 5 },
+        effects: { materiel: -8 * MAT_SCALE, approval: 5 },
         resultText:
           'The bill passes largely intact. Colonial governors are pleased; the treasury notices.',
       },
@@ -57,7 +58,7 @@ export const EVENTS: EventDef[] = [
       },
       {
         label: 'Gut it to a token gesture',
-        effects: { materiel: -2, approval: -2 },
+        effects: { materiel: -2 * MAT_SCALE, approval: -2 },
         resultText:
           'A watered down version passes, satisfying no one badly enough to matter, and no one ' +
           'enough to notice.',
@@ -74,14 +75,14 @@ export const EVENTS: EventDef[] = [
     choices: [
       {
         label: 'Grant full clearance, house them in emergency facilities',
-        effects: { materiel: -12, approval: 9 },
+        effects: { materiel: -12 * MAT_SCALE, approval: 9 },
         resultText:
           'The stations open. Emergency housing consumes supplies meant for the fleet, and the ' +
           'Republic is seen to keep faith with its own.',
       },
       {
         label: 'Redirect to outer colony processing centers',
-        effects: { materiel: -4, approval: -3 },
+        effects: { materiel: -4 * MAT_SCALE, approval: -3 },
         resultText:
           'The transports are routed outward. Costs stay low; the frontier press notes whose ' +
           'doorstep the displaced were left on.',
@@ -106,7 +107,7 @@ export const EVENTS: EventDef[] = [
     choices: [
       {
         label: 'Fund the resistance covertly',
-        effects: { materiel: -15, leadershipPoints: 2 },
+        effects: { materiel: -15 * MAT_SCALE, leadershipPoints: 2 },
         resultText:
           'Quiet channels move funds and small arms toward New Virginia. If discovered, the ' +
           'cost will be political as much as material.',
@@ -142,13 +143,13 @@ export const EVENTS: EventDef[] = [
     choices: [
       {
         label: 'Grant it, scrape the barrel if needed',
-        effects: { population: -40, manpower: 15 },
+        effects: { population: -40 * POP_SCALE, manpower: 15 },
         resultText:
           'Conscription notices go out across the core worlds. Industry loses hands now; the ' +
           'manpower those formations provide will pay for itself later.',
         delayed: {
           afterDays: 6,
-          effects: { materiel: 18 },
+          effects: { materiel: 18 * MAT_SCALE },
           text: 'Conscripted formations reach the line and captured production comes back online.',
         },
       },
@@ -178,26 +179,26 @@ export const EVENTS: EventDef[] = [
     choices: [
       {
         label: 'Divert civilian shipping fuel to the fleet',
-        effects: { materiel: 10, approval: -6 },
+        effects: { materiel: 10 * MAT_SCALE, approval: -6 },
         resultText:
           'Cargo lines and passenger routes lose priority overnight. The fleet refuels; ' +
           'merchants and commuters do not forget it.',
       },
       {
         label: 'Ration patrol tempo instead',
-        effects: { materiel: -3, leadershipPoints: -1 },
+        effects: { materiel: -3 * MAT_SCALE, leadershipPoints: -1 },
         resultText:
           'Patrol schedules thin out across the frontier. Nothing dramatic happens today, which ' +
           'is exactly the risk.',
       },
       {
         label: 'Fund emergency synthetic fuel production',
-        effects: { materiel: -18 },
+        effects: { materiel: -18 * MAT_SCALE },
         resultText:
           "A costly stopgap is authorized. It will take weeks to pay for itself, if it works at all.",
         delayed: {
           afterDays: 8,
-          effects: { materiel: 20 },
+          effects: { materiel: 20 * MAT_SCALE },
           text:
             "The emergency synthetic fuel plants come online, and the fleet's fuel problem " +
             'quietly disappears.',
@@ -215,7 +216,7 @@ export const EVENTS: EventDef[] = [
     choices: [
       {
         label: 'Fund a deep reconnaissance operation',
-        effects: { materiel: -10 },
+        effects: { materiel: -10 * MAT_SCALE },
         resultText:
           'A deep reconnaissance flight is authorized. The ships are gone for weeks; what they ' +
           'bring back will shape the campaign.',
@@ -258,7 +259,7 @@ export const EVENTS: EventDef[] = [
       },
       {
         label: 'Offer a prisoner exchange through back channels',
-        effects: { materiel: 6, approval: 3 },
+        effects: { materiel: 6 * MAT_SCALE, approval: 3 },
         resultText:
           'Quiet feelers go out for an exchange. It buys goodwill nobody can point to and gives ' +
           'up whatever the prisoners knew.',
@@ -282,7 +283,7 @@ export const EVENTS: EventDef[] = [
     choices: [
       {
         label: 'Address the criticism directly in Congress',
-        effects: { approval: 7, materiel: -3 },
+        effects: { approval: 7, materiel: -3 * MAT_SCALE },
         resultText:
           'You answer the senator on the floor and pledge frontier appropriations. The chamber ' +
           'quiets; the pledge has a price.',
@@ -296,7 +297,7 @@ export const EVENTS: EventDef[] = [
       },
       {
         label: 'Quietly investigate whether the claims have merit',
-        effects: { approval: 3, materiel: -4 },
+        effects: { approval: 3, materiel: -4 * MAT_SCALE },
         resultText:
           'A quiet audit of frontier appropriations begins. It costs staff and funds, and it will ' +
           'tell you something the speeches will not.',
@@ -328,7 +329,7 @@ export const EVENTS: EventDef[] = [
       },
       {
         label: 'Split the difference with a temporary compromise',
-        effects: { approval: 1, materiel: -5 },
+        effects: { approval: 1, materiel: -5 * MAT_SCALE },
         resultText:
           'A compromise structure satisfies the room without truly resolving anything. It ' +
           'usually does.',
@@ -347,14 +348,14 @@ export const EVENTS: EventDef[] = [
     choices: [
       {
         label: 'Launch a public investigation immediately',
-        effects: { approval: 8, materiel: -6 },
+        effects: { approval: 8, materiel: -6 * MAT_SCALE },
         resultText:
           'The investigation is announced from the Capitol steps. It costs contracts and ' +
           'schedules in the short term, and buys back some public trust.',
       },
       {
         label: 'Handle it quietly through contract renegotiation',
-        effects: { materiel: 8, approval: -5 },
+        effects: { materiel: 8 * MAT_SCALE, approval: -5 },
         resultText:
           'The matter is settled behind closed doors. The treasury recovers something; when the ' +
           'story breaks anyway, the quiet handling looks like part of the problem.',
@@ -379,7 +380,7 @@ export const EVENTS: EventDef[] = [
     choices: [
       {
         label: 'Fund a deep reconnaissance operation',
-        effects: { materiel: -10 },
+        effects: { materiel: -10 * MAT_SCALE },
         resultText:
           'Scouts are diverted to the frontier system. The Republic pays now for a picture it will ' +
           'not have for weeks.',

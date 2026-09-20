@@ -10,6 +10,7 @@ import {
 } from '../game/fleets';
 import { FOCUS_PATH } from '../game/focuses';
 import { occupationEventFor } from '../game/occupation';
+import { formatMoney, formatPopulation } from '../game/scale';
 import { SHIP_TYPE_LIST, SHIP_TYPES } from '../game/ships';
 import { STANCES, STANCE_LABEL, estimateWinChance } from '../game/stance';
 import { TAX_POLICIES, TAX_POLICY_LABEL, buildTimeMultiplierFor } from '../game/state';
@@ -209,8 +210,8 @@ function BuildPanel({
           const buildDays = Math.max(1, Math.round(def.buildDays * buildMultiplier));
           const cost =
             def.manpowerCost > 0
-              ? `${def.materielCost} materiel, ${def.manpowerCost} manpower, ${buildDays}d`
-              : `${def.materielCost} materiel, ${buildDays}d`;
+              ? `${formatMoney(def.materielCost)}, ${def.manpowerCost} manpower, ${buildDays}d`
+              : `${formatMoney(def.materielCost)}, ${buildDays}d`;
           return (
             <button
               key={def.id}
@@ -283,7 +284,7 @@ function TroopTrainingPanel({
           title={affordable ? undefined : 'Not enough materiel or manpower'}
           onClick={() => onTrainTroops(system.id)}
         >
-          Train {TROOP_TRAINING.count} Troops · {TROOP_TRAINING.materielCost} materiel,{' '}
+          Train {TROOP_TRAINING.count} Troops · {formatMoney(TROOP_TRAINING.materielCost)},{' '}
           {TROOP_TRAINING.manpowerCost} manpower, {TROOP_TRAINING.days}d
         </button>
       </div>
@@ -650,18 +651,24 @@ export default function SystemPanel({
         <p className="panel-eyebrow">{CONTROLLER_LABEL[controller]}</p>
         <h2>{system.name}</h2>
         <p className="panel-note">{system.note}</p>
-        {isHostile && (
-          <dl className="panel-stats">
-            <div>
-              <dt>Garrison</dt>
-              <dd>{garrisons[system.id] ?? 0}</dd>
-            </div>
-            <div>
-              <dt>Ground Defense</dt>
-              <dd>{groundDefenses[system.id] ?? 0}</dd>
-            </div>
-          </dl>
-        )}
+        <dl className="panel-stats">
+          <div>
+            <dt>Population</dt>
+            <dd>{formatPopulation(system.population)}</dd>
+          </div>
+          {isHostile && (
+            <>
+              <div>
+                <dt>Garrison</dt>
+                <dd>{garrisons[system.id] ?? 0}</dd>
+              </div>
+              <div>
+                <dt>Ground Defense</dt>
+                <dd>{groundDefenses[system.id] ?? 0}</dd>
+              </div>
+            </>
+          )}
+        </dl>
       </header>
 
       <div className="tabs" role="tablist" aria-label={`${system.name} administration`}>

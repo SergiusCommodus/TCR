@@ -1,3 +1,5 @@
+import { MAT_SCALE } from './scale';
+
 /**
  * Ground troop training: trained directly from manpower and materiel over
  * time, at Sol only, the same restriction and general shape as ship
@@ -11,7 +13,7 @@ export const TROOP_TRAINING = {
   /** Troops added to the training system's pool when one order completes. */
   count: 5,
   /** Deducted from materiel immediately when training begins. */
-  materielCost: 10,
+  materielCost: 10 * MAT_SCALE,
   /** Deducted from manpower immediately when training begins. */
   manpowerCost: 15,
   /** In game days from when training begins to when the troops are ready,

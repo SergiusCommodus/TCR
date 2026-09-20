@@ -22,6 +22,14 @@ export interface SystemDef {
    *  cleared without being taken. Same static/live split, in
    *  GameSession.groundDefenses. */
   groundDefense?: number;
+  /** This system's population — flavor data only, shown in its panel
+   *  header, sized realistically by what kind of system it is (a small
+   *  colony in the low millions, a core world in the billions). It plays no
+   *  part in game logic: it never feeds the national GameState.population
+   *  total (see INITIAL_STATE in state.ts) and no effect reads or writes it,
+   *  the same way a Republic system's absent garrisonStrength isn't summed
+   *  into anything either. */
+  population: number;
 }
 
 export const CONTROLLER_LABEL: Record<Controller, string> = {
@@ -38,6 +46,7 @@ export const SYSTEMS: SystemDef[] = [
     note: 'Capital system. Congress, the orbital yards, and two thirds of Republic heavy industry.',
     x: 34,
     y: 58,
+    population: 2_800_000_000,
   },
   {
     id: 'new-virginia',
@@ -48,6 +57,7 @@ export const SYSTEMS: SystemDef[] = [
     y: 30,
     garrisonStrength: 8,
     groundDefense: 6,
+    population: 240_000_000,
   },
   {
     id: 'anchorage',
@@ -56,6 +66,7 @@ export const SYSTEMS: SystemDef[] = [
     note: 'Forward naval station. Intact, under-provisioned, and now the nearest Republic base to the front.',
     x: 18,
     y: 22,
+    population: 3_000_000,
   },
   {
     id: 'shiloh',
@@ -66,6 +77,7 @@ export const SYSTEMS: SystemDef[] = [
     y: 80,
     garrisonStrength: 4,
     groundDefense: 3,
+    population: 60_000_000,
   },
   {
     id: 'meridian',
@@ -74,6 +86,7 @@ export const SYSTEMS: SystemDef[] = [
     note: "Republic agricultural belt, feeding fleets and cities alike since before the war. Distance from the front is its only real defense.",
     x: 14,
     y: 78,
+    population: 140_000_000,
   },
   {
     id: 'vicksburg',
@@ -84,6 +97,7 @@ export const SYSTEMS: SystemDef[] = [
     y: 55,
     garrisonStrength: 5,
     groundDefense: 4,
+    population: 95_000_000,
   },
 ];
 

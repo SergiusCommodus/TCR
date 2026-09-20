@@ -1,3 +1,4 @@
+import { MAT_SCALE } from './scale';
 import type { ShipType } from './types';
 
 export interface ShipTypeDef {
@@ -37,7 +38,7 @@ export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
     id: 'escort',
     name: 'Escort',
     pluralName: 'Escorts',
-    materielCost: 15,
+    materielCost: 15 * MAT_SCALE,
     buildDays: 4,
     strength: 1,
     groundTroopCapacity: 0,
@@ -47,7 +48,7 @@ export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
     id: 'cruiser',
     name: 'Cruiser',
     pluralName: 'Cruisers',
-    materielCost: 40,
+    materielCost: 40 * MAT_SCALE,
     buildDays: 10,
     strength: 3,
     groundTroopCapacity: 0,
@@ -57,7 +58,7 @@ export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
     id: 'transport',
     name: 'Transport',
     pluralName: 'Transports',
-    materielCost: 25,
+    materielCost: 25 * MAT_SCALE,
     buildDays: 7,
     strength: 0,
     groundTroopCapacity: 2,

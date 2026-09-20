@@ -1,3 +1,4 @@
+import { MAT_SCALE } from './scale';
 import type { Effects } from './types';
 
 export interface FocusDef {
@@ -44,7 +45,7 @@ export const FOCUS_PATH: FocusDef[] = [
       'Congress passes the National Mobilization Act, ordering colonial industry onto a war footing.',
     completeText:
       'The National Mobilization Act is fully implemented; materiel output climbs across every Republic world.',
-    dailyModifier: { materiel: 0.4 },
+    dailyModifier: { materiel: 0.4 * MAT_SCALE },
   },
   {
     id: 'shipyard-expansion',
@@ -107,7 +108,7 @@ export const FOCUS_PATH: FocusDef[] = [
     startText: 'The Republic shifts to Total War Footing, committing every available resource to the war effort.',
     completeText:
       'Total War Footing takes hold; materiel and manpower surge, though the strain on public patience is starting to show.',
-    dailyModifier: { materiel: 0.8, manpower: 0.4, approval: -0.3 },
+    dailyModifier: { materiel: 0.8 * MAT_SCALE, manpower: 0.4, approval: -0.3 },
   },
   {
     id: 'reconstruction-directive',
@@ -137,7 +138,7 @@ export const FOCUS_PATH: FocusDef[] = [
       'Emergency Requisition Powers take full effect; materiel flows from worlds that used to ' +
       'keep more of what they made.',
     onComplete: { approval: -6 },
-    dailyModifier: { materiel: 0.7 },
+    dailyModifier: { materiel: 0.7 * MAT_SCALE },
   },
   {
     id: 'unified-war-production-board',
@@ -168,7 +169,7 @@ export const FOCUS_PATH: FocusDef[] = [
     completeText:
       'Total Mobilization takes hold across every Republic world still standing; materiel and ' +
       'manpower surge again, and so does the strain.',
-    dailyModifier: { materiel: 1.2, manpower: 0.8, approval: -0.6 },
+    dailyModifier: { materiel: 1.2 * MAT_SCALE, manpower: 0.8, approval: -0.6 },
   },
   {
     id: 'continental-defense-initiative',

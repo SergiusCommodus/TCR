@@ -27,6 +27,7 @@ import {
   nextFleetName,
   sumComposition,
 } from './fleets';
+import { MAT_SCALE, POP_SCALE, formatMagnitude, formatMoney, formatPopulation } from './scale';
 import { SHIP_TYPES } from './ships';
 import { STANCE_LABEL, resolveStanceCombat } from './stance';
 import { HOME_SYSTEM_ID, SYSTEMS, currentController, systemById, systemName } from './systems';
@@ -66,8 +67,8 @@ const RANDOM_EVENT_CHANCE = 0.5;
 
 export const INITIAL_STATE: GameState = {
   daysElapsed: 0,
-  materiel: 120,
-  population: 9400,
+  materiel: 120 * MAT_SCALE,
+  population: 9400 * POP_SCALE,
   approval: 58,
   leadershipPoints: 4,
   manpower: 30,
@@ -79,8 +80,8 @@ export const INITIAL_STATE: GameState = {
  *  spanned 5 turns, so the old per turn drift is scaled to roughly a fifth to
  *  keep the same economic pressure. */
 const DAILY_UPKEEP: Effects = {
-  materiel: -1.2,
-  population: 1,
+  materiel: -1.2 * MAT_SCALE,
+  population: 1 * POP_SCALE,
   approval: -0.4,
   leadershipPoints: 0.2,
   manpower: 0.5,
@@ -94,9 +95,9 @@ const DAILY_UPKEEP: Effects = {
  * tax policy.
  */
 const TAX_POLICY_MODIFIERS: Record<TaxPolicy, { materiel: number; approval: number }> = {
-  low: { materiel: -0.6, approval: 0.6 },
+  low: { materiel: -0.6 * MAT_SCALE, approval: 0.6 },
   standard: { materiel: 0, approval: 0 },
-  wartime: { materiel: 0.8, approval: -0.8 },
+  wartime: { materiel: 0.8 * MAT_SCALE, approval: -0.8 },
 };
 
 /** Short, narrated line logged when the player changes tax policy. */
@@ -204,6 +205,12 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 /** Whole day number used in log lines and readouts. */
 export const dayLabel = (days: number) => Math.floor(days);
 
+// formatMagnitude/formatPopulation/formatMoney live in ./scale (imported
+// above), re-exported here so UI components can keep importing display
+// helpers from state.ts alongside dayLabel, TAX_POLICY_LABEL and everything
+// else they already do.
+export { formatMagnitude, formatMoney, formatPopulation };
+
 export function applyEffects(state: GameState, effects: Effects): GameState {
   return {
     ...state,
@@ -228,7 +235,14 @@ export function describeEffects(effects: Effects): string {
     .filter((key) => (effects[key] ?? 0) !== 0)
     .map((key) => {
       const value = effects[key] as number;
-      return `${LABELS[key]} ${value > 0 ? '+' : ''}${round1(value)}`;
+      const sign = value > 0 ? '+' : '';
+      // Materiel and population are large, rescaled magnitudes now — shown
+      // with the same K/M/B/T formatting the briefing panel and system
+      // panel use, not the raw underlying number. Every other effect stays
+      // a plain, small number.
+      if (key === 'materiel') return `${LABELS[key]} ${sign}${formatMoney(value)}`;
+      if (key === 'population') return `${LABELS[key]} ${sign}${formatPopulation(value)}`;
+      return `${LABELS[key]} ${sign}${round1(value)}`;
     });
   return parts.length ? parts.join(', ') : 'no immediate change';
 }

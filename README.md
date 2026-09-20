@@ -177,7 +177,7 @@ system; any of those leaves the fleet list untouched.
 The Military tab shows a Shipyard section only when Sol is selected —
 construction is Sol only for now, enforced both in the UI and, defensively, in
 the reducer. Two ship types, defined as plain data in `src/game/ships.ts`:
-Escort (15 materiel, 4 days) and Cruiser (40 materiel, 10 days). Clicking a
+Escort ($150M, 4 days) and Cruiser ($400M, 10 days). Clicking a
 build button deducts the cost immediately (disabled if you can't afford it)
 and adds an order to a build queue, shown under the Shipyard while anything is
 building. The order stores an absolute `completesOnDay`, the same pattern as
@@ -380,10 +380,10 @@ fill with redundant lines.
 
 The "Emergency Conscription Authority" event (day 9, unchanged framing and
 choices) now pulls its payoff from manpower instead of a flat approval
-hit: granting conscription still pulls 40 from population, exactly as
-before, but grants 15 manpower rather than costing 8 approval. The delayed
-materiel payoff six days later is untouched. The other two choices on that
-event are untouched.
+hit: granting conscription still pulls 40M from population, exactly the
+same relative size as before the rescale, but grants 15 manpower rather
+than costing 8 approval. The delayed materiel payoff six days later is
+untouched. The other two choices on that event are untouched.
 
 ## National Focus tree
 
@@ -607,11 +607,45 @@ or a message naming the problem if the saved data doesn't parse or validate
 from a choice's deltas.
 
 Daily drift (`DAILY_UPKEEP` in `src/game/state.ts`, at Standard tax policy) is
-materiel -1.2, population +1, approval -0.4, leadership +0.2, manpower +0.5.
+materiel -$12M, population +1M, approval -0.4, leadership +0.2, manpower +0.5.
 The scripted events now span 22 days where they once spanned 5 turns, so the
 old per turn drift was scaled to roughly a fifth to keep the same economic
 pressure; a run to day 30 lands within a few points of where the turn based
 version landed at its last scripted event.
+
+### Economy scale
+
+Materiel and population are large, realistic magnitudes — a national war
+treasury in the hundreds of millions to low billions, a population in the
+millions to billions — rather than the small abstract numbers earlier
+versions used, formatted with a K/M/B/T suffix wherever they're shown
+(`formatMoney`/`formatPopulation`/`formatMagnitude` in `src/game/scale.ts`):
+"$1.2B", "-$250M", "9.4B", "340M". `describeEffects` (`src/game/state.ts`)
+uses the same formatting for materiel and population in every log line and
+decision preview; approval, leadership and manpower stay small plain numbers,
+untouched by the rescale.
+
+Underneath, this is a pure linear rescale, not a balance change: every
+materiel literal in the codebase — `INITIAL_STATE`, `DAILY_UPKEEP`, tax
+policy modifiers, every event and National Focus effect, ship and troop
+training costs — is the old placeholder value times `MAT_SCALE`
+(10,000,000); every population literal is the old value times `POP_SCALE`
+(1,000,000). Every ratio, threshold and "can I afford this" comparison the
+game's balance depends on is exactly what it always was; only the numbers
+themselves, and how they're displayed, changed. Both constants live in
+`src/game/scale.ts` rather than `state.ts`, since `state.ts` already imports
+from every file (events, occupation, focuses, ships, troops) that needs
+them to scale its own literals, and a two way import would be circular.
+
+Population also gained a per-system dimension, but only as flavor: each
+`SystemDef` in `src/game/systems.ts` now carries a static `population` —
+Sol, the capital, at 2.8B; small colonies and the forward naval station at
+Anchorage from 3M to 240M — shown in every system panel's header regardless
+of controller. It plays no part in game logic: it never feeds the national
+`GameState.population` total and no effect reads or writes it, the same way
+a Republic system's absent `garrisonStrength` isn't summed into anything
+either. Garrison and Ground Defense stay hostile-system-only in that same
+header, unchanged.
 
 `src/game/systems.ts` holds the six systems plus an `EVENT_SCOPE` map from
 event id to system id or `'global'`, keeping event content free of layout
@@ -622,7 +656,11 @@ concerns. An event id missing from that map falls back to `'global'`.
 - `src/game/events.ts` — event content.
 - `src/game/state.ts` — the clock, the reducer, upkeep, delayed effects,
   fleets, and `serializeSession`/`deserializeSession` for save and load.
-- `src/game/systems.ts` — systems, controllers, map positions, event scope.
+- `src/game/scale.ts` — `MAT_SCALE`/`POP_SCALE` and the
+  `formatMoney`/`formatPopulation`/`formatMagnitude` display helpers, kept
+  separate from `state.ts` to avoid a circular import.
+- `src/game/systems.ts` — systems, controllers, map positions, event scope,
+  and each system's flavor-only `population`.
 - `src/game/fleets.ts` — transit, naming and composition helpers shared by
   the map and the panel, including `groundTroopCapacity`.
 - `src/game/travel.ts` — the per-pair travel time table and lane list.

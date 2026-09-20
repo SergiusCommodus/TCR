@@ -1,3 +1,4 @@
+import { POP_SCALE } from './scale';
 import type { EventDef, Effects } from './types';
 
 export type OccupationChoiceId = 'bombard' | 'enslave-deport' | 'exterminate' | 'occupy';
@@ -5,10 +6,12 @@ export type OccupationChoiceId = 'bombard' | 'enslave-deport' | 'exterminate' | 
 export interface OccupationChoiceDef {
   id: OccupationChoiceId;
   label: string;
-  /** Population and approval deltas, applied to the national totals — there
-   *  is no per-system population tracked, so the consequence is narrated as
-   *  falling on the taken system while mechanically landing on the same
-   *  aggregate numbers every other choice in the game already uses. */
+  /** Population and approval deltas, applied to the national totals — a
+   *  system's own SystemDef.population is static flavor data only (see
+   *  systems.ts), not a live figure these consequences draw down, so the
+   *  outcome is narrated as falling on the taken system while mechanically
+   *  landing on the same aggregate numbers every other choice in the game
+   *  already uses. */
   effects: Effects;
   /** Takes the system's name so the consequence reads naturally. */
   resultText: (systemName: string) => string;
@@ -31,7 +34,7 @@ export const OCCUPATION_CHOICES: OccupationChoiceDef[] = [
   {
     id: 'bombard',
     label: 'Bombard the system into submission',
-    effects: { population: -140, approval: -18 },
+    effects: { population: -140 * POP_SCALE, approval: -18 },
     resultText: (name) =>
       `Orbital batteries reduce ${name}'s cities to rubble. Resistance ends within the day; ` +
       `so does most of what resistance would have depended on. The fleet reports the system ` +
@@ -41,7 +44,7 @@ export const OCCUPATION_CHOICES: OccupationChoiceDef[] = [
   {
     id: 'enslave-deport',
     label: 'Enslave and deport the population',
-    effects: { population: -90, approval: -22 },
+    effects: { population: -90 * POP_SCALE, approval: -22 },
     resultText: (name) =>
       `Ground crews round up ${name}'s survivors for deportation and forced labor. Transports ` +
       'leave overcrowded holds where farmland and hospitals stood. Word of it reaches Sol ' +
@@ -51,7 +54,7 @@ export const OCCUPATION_CHOICES: OccupationChoiceDef[] = [
   {
     id: 'exterminate',
     label: 'Exterminate the population',
-    effects: { population: -160, approval: -28 },
+    effects: { population: -160 * POP_SCALE, approval: -28 },
     resultText: (name) =>
       `Orders go out and are carried out. ${name} is emptied of the living. The fleet's own ` +
       'log entries grow terse, and then stop.',
@@ -60,7 +63,7 @@ export const OCCUPATION_CHOICES: OccupationChoiceDef[] = [
   {
     id: 'occupy',
     label: 'Occupy and govern',
-    effects: { population: -15, approval: 12 },
+    effects: { population: -15 * POP_SCALE, approval: 12 },
     resultText: (name) =>
       `Republic marines secure ${name}'s capital and post the flag over the old planetary ` +
       'government. Civil administration begins under martial law, imperfect and improvised, ' +
