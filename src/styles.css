@@ -1,24 +1,52 @@
-/* Single dark theme: the map is a starfield, so the whole console commits to it. */
+/*
+ * Mission control instrumentation theme. One dark console, one accent blue
+ * for chrome (borders, active/interactive states), and a three color status
+ * scale (green/amber/red) for nominal-or-friendly / caution-or-contested /
+ * critical-or-hostile, applied consistently to text, borders and small
+ * indicator dots rather than whole panel backgrounds. Every existing
+ * controller-suffixed class name (node-republic, head-directorate, ...)
+ * keeps working unchanged — only what color it resolves to has moved onto
+ * this scale, via the --republic/--directorate/--contested aliases below.
+ */
 :root {
-  --space: #05070d;
-  --space-deep: #03050a;
-  --hull: #101722;
-  --hull-raised: #16202d;
-  --line: #24313f;
-  --line-bright: #35485c;
-  --ink: #dde5ef;
-  --muted: #8a99ac;
-  --republic: #4f92e3;
-  --republic-dim: #1d3a5c;
-  --directorate: #e0584c;
-  --directorate-dim: #4a2320;
-  --contested: #e0a13a;
-  --contested-dim: #4a3717;
+  --space: #04070c;
+  --space-deep: #020409;
+  --hull: #0b131c;
+  --hull-raised: #121c28;
+  --line: #1e2a37;
+  --line-bright: #34495e;
+  --ink: #e6edf6;
+  --muted: #7c8fa3;
+
+  /* Console chrome: interactive elements, active states, focus, progress —
+   *  never a status judgement on its own. */
+  --accent: #3fb6ff;
+  --accent-dim: #102c42;
+
+  /* The status scale itself. */
+  --status-good: #2fd67c;
+  --status-good-dim: #0e2f1f;
+  --status-caution: #eea83c;
+  --status-caution-dim: #40300f;
+  --status-critical: #ff5c5c;
+  --status-critical-dim: #401717;
+
+  /* Back compat aliases: every controller-scoped selector in this file
+   *  (node-republic, head-directorate, combat-side-defender, ...) reads
+   *  these, so recoloring the scale above is the only place that changes. */
+  --republic: var(--status-good);
+  --republic-dim: var(--status-good-dim);
+  --directorate: var(--status-critical);
+  --directorate-dim: var(--status-critical-dim);
+  --contested: var(--status-caution);
+  --contested-dim: var(--status-caution-dim);
 
   color-scheme: dark;
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --mono: 'Roboto Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'Liberation Mono', monospace;
+  --sans: 'IBM Plex Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--sans);
   line-height: 1.5;
-  --mono: ui-monospace, SFMono-Regular, Menlo, 'Liberation Mono', monospace;
 }
 
 * {
@@ -27,9 +55,76 @@
 
 body {
   margin: 0;
-  background: var(--space-deep);
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(63, 182, 255, 0.025) 0px,
+      rgba(63, 182, 255, 0.025) 1px,
+      transparent 1px,
+      transparent 28px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(63, 182, 255, 0.025) 0px,
+      rgba(63, 182, 255, 0.025) 1px,
+      transparent 1px,
+      transparent 28px
+    ),
+    var(--space-deep);
   color: var(--ink);
+  font-family: var(--sans);
   font-size: 15px;
+}
+
+button {
+  font-family: var(--mono);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--mono);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* Reusable "instrument module": a bordered panel with a thin accent edge
+ *  and a small uppercase header label, the base look every panel in the
+ *  app builds on. */
+.module-label {
+  margin: 0 0 0.5rem;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+}
+
+/* Small status indicator dot — green/amber/red, named by the same
+ *  controller suffix every other status-scoped class in this file uses. */
+.status-dot {
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  flex: none;
+}
+
+.status-dot-republic {
+  background: var(--republic);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--republic) 70%, transparent);
+}
+
+.status-dot-directorate {
+  background: var(--directorate);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--directorate) 70%, transparent);
+}
+
+.status-dot-contested {
+  background: var(--contested);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--contested) 70%, transparent);
 }
 
 .app {
@@ -47,35 +142,47 @@ body {
 .status-bar {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: stretch;
   justify-content: space-between;
-  gap: 0.9rem 1.5rem;
-  padding: 0.85rem 1.1rem;
+  gap: 0;
   background: var(--hull);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-top: 2px solid var(--accent);
+}
+
+.identity,
+.clock,
+.briefing-block {
+  padding: 0.85rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.identity {
+  border-right: 1px solid var(--line);
 }
 
 .identity h1 {
   margin: 0;
-  font-size: 1.05rem;
-  letter-spacing: 0.02em;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .identity p {
-  margin: 0;
+  margin: 0.15rem 0 0;
   font-family: var(--mono);
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   text-transform: uppercase;
   letter-spacing: 0.18em;
-  color: var(--muted);
+  color: var(--accent);
 }
 
 .clock {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
+  gap: 0.4rem;
   min-width: 15rem;
+  border-right: 1px solid var(--line);
 }
 
 .clock-readout {
@@ -93,23 +200,31 @@ body {
 }
 
 .clock-day {
-  font-size: 1.35rem;
+  font-size: 1.4rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  line-height: 1.15;
+  line-height: 1.1;
 }
 
 .day-progress {
   height: 3px;
   background: var(--space);
   border: 1px solid var(--line);
-  border-radius: 2px;
-  overflow: hidden;
 }
 
 .day-progress span {
   display: block;
   height: 100%;
-  background: var(--republic);
+  background: var(--accent);
+}
+
+.speed-label {
+  margin: 0.1rem 0 0;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
 }
 
 .speed {
@@ -125,7 +240,7 @@ body {
   background: transparent;
   color: var(--muted);
   border: 1px solid var(--line);
-  border-radius: 2px;
+  border-radius: 0;
   cursor: pointer;
 }
 
@@ -135,14 +250,19 @@ body {
 }
 
 .speed-button.is-active {
-  background: var(--republic-dim);
-  border-color: var(--republic);
+  background: var(--accent-dim);
+  border-color: var(--accent);
   color: var(--ink);
 }
 
 .speed-button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.briefing-block {
+  flex: 1;
+  min-width: 18rem;
 }
 
 .briefing {
@@ -154,33 +274,42 @@ body {
 
 .briefing dt {
   font-family: var(--mono);
-  font-size: 0.62rem;
+  font-size: 0.6rem;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--muted);
 }
 
 .briefing dd {
-  margin: 0;
-  font-size: 1.35rem;
+  margin: 0.1rem 0 0;
+  font-size: 1.3rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  line-height: 1.15;
+  line-height: 1.1;
 }
 
-/* ---------- global event banner ---------- */
+/* ---------- alert rail: global banners, sensor pings, pending hints and
+ *  the panel queue indicator — everything time sensitive stays grouped
+ *  together, above the fold, never buried under a tab or scroll. ---------- */
+
+.alert-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
 
 .global-banner {
   border: 1px solid var(--contested);
-  border-left-width: 3px;
-  background: linear-gradient(180deg, var(--contested-dim), var(--hull) 60%);
-  border-radius: 3px;
+  border-left-width: 4px;
+  background: var(--hull);
   padding: 0.9rem 1.1rem;
 }
 
 .banner-eyebrow {
-  margin: 0 0 0.4rem;
+  margin: 0 0 0.5rem;
   font-family: var(--mono);
   font-size: 0.65rem;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.16em;
   color: var(--contested);
@@ -188,9 +317,8 @@ body {
 
 .directorate-alert {
   border: 1px solid var(--directorate);
-  border-left-width: 3px;
-  background: linear-gradient(180deg, var(--directorate-dim), var(--hull) 60%);
-  border-radius: 3px;
+  border-left-width: 4px;
+  background: var(--hull);
   padding: 0.9rem 1.1rem;
 }
 
@@ -203,30 +331,64 @@ body {
 }
 
 .pending-hint {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
   font: inherit;
+  font-family: var(--sans);
   text-align: left;
   color: var(--ink);
-  background: var(--hull-raised);
-  border: 1px solid var(--line-bright);
-  border-left: 3px solid var(--directorate);
-  border-radius: 3px;
+  background: var(--hull);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--contested);
+  border-radius: 0;
   padding: 0.6rem 0.9rem;
   cursor: pointer;
+  width: 100%;
+}
+
+.pending-hint::before {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--contested);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--contested) 70%, transparent);
+  flex: none;
 }
 
 .pending-hint:hover {
-  background: var(--directorate-dim);
+  background: var(--contested-dim);
+  border-color: var(--contested);
 }
 
 .queue-indicator {
-  display: inline-block;
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
   margin: 0;
-  color: var(--muted);
-  font-size: 0.75rem;
-  padding: 0.2rem 0.6rem;
-  border: 1px solid var(--line-bright);
-  border-radius: 999px;
-  background: var(--hull-raised);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  background: var(--hull);
+}
+
+.queue-indicator::before {
+  content: '';
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--accent) 70%, transparent);
+  flex: none;
 }
 
 /* ---------- stage: map + system panel ---------- */
@@ -238,11 +400,25 @@ body {
   align-items: stretch;
 }
 
+.map-module {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-top: 2px solid var(--accent);
+  background: var(--hull);
+}
+
+.map-module .module-label {
+  margin: 0;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--line);
+}
+
 .map {
   position: relative;
+  flex: 1;
   min-height: 27rem;
-  border: 1px solid var(--line);
-  border-radius: 3px;
   background:
     radial-gradient(1px 1px at 12% 18%, #6d7f95 50%, transparent 50%),
     radial-gradient(1px 1px at 82% 12%, #59697d 50%, transparent 50%),
@@ -280,7 +456,6 @@ body {
   padding: 0.4rem;
   background: transparent;
   border: 0;
-  border-radius: 3px;
   color: var(--ink);
   font: inherit;
   cursor: pointer;
@@ -293,7 +468,7 @@ body {
   border-radius: 50%;
   border: 2px solid currentColor;
   background: var(--space);
-  box-shadow: 0 0 0 4px rgba(5, 7, 13, 0.85);
+  box-shadow: 0 0 0 4px rgba(4, 7, 12, 0.85);
 }
 
 .node-republic {
@@ -323,7 +498,7 @@ body {
 .node:hover .node-dot,
 .node.is-selected .node-dot {
   box-shadow:
-    0 0 0 4px rgba(5, 7, 13, 0.85),
+    0 0 0 4px rgba(4, 7, 12, 0.85),
     0 0 0 6px currentColor;
 }
 
@@ -339,8 +514,10 @@ body {
 }
 
 .node-name {
-  font-size: 0.82rem;
-  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
   color: var(--ink);
   text-shadow: 0 1px 3px var(--space-deep);
   white-space: nowrap;
@@ -357,13 +534,13 @@ body {
 
 .node-tag {
   font-family: var(--mono);
-  font-size: 0.58rem;
+  font-size: 0.56rem;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   padding: 0.1rem 0.3rem;
   border: 1px solid currentColor;
-  border-radius: 2px;
-  background: rgba(5, 7, 13, 0.8);
+  background: rgba(4, 7, 12, 0.85);
   white-space: nowrap;
 }
 
@@ -412,9 +589,8 @@ body {
   font-size: 0.6rem;
   letter-spacing: 0.06em;
   padding: 0.15rem 0.35rem;
-  background: rgba(5, 7, 13, 0.85);
+  background: rgba(4, 7, 12, 0.9);
   border: 1px solid var(--republic-dim);
-  border-radius: 2px;
   white-space: nowrap;
 }
 
@@ -431,7 +607,7 @@ body {
   min-width: 0;
   background: var(--hull);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-top: 2px solid var(--accent);
 }
 
 .panel-head {
@@ -454,60 +630,82 @@ body {
 
 .panel-eyebrow {
   margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   font-family: var(--mono);
   font-size: 0.62rem;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--muted);
 }
 
 .panel-head h2 {
-  margin: 0.15rem 0 0.3rem;
-  font-size: 1.1rem;
+  margin: 0.25rem 0 0.3rem;
+  font-size: 1.15rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
 }
 
 .panel-note {
   margin: 0;
+  font-family: var(--sans);
   font-size: 0.8rem;
   color: var(--muted);
 }
 
 .panel-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.5rem 1.2rem;
+  margin: 0.65rem 0 0;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--line);
+}
+
+.panel-stats > div {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 1.4rem;
-  margin: 0.6rem 0 0;
-  padding-top: 0.55rem;
-  border-top: 1px dashed var(--line);
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.3rem;
 }
 
 .panel-stats dt {
   font-family: var(--mono);
   font-size: 0.6rem;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   color: var(--muted);
 }
 
 .panel-stats dd {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 1rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
+  text-align: right;
 }
 
 .tabs {
   display: flex;
   border-bottom: 1px solid var(--line);
+  background: var(--space);
 }
 
 .tab {
   flex: 1;
   position: relative;
   font: inherit;
-  font-size: 0.74rem;
-  letter-spacing: 0.04em;
-  padding: 0.55rem 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.6rem 0.3rem;
   background: transparent;
   color: var(--muted);
   border: 0;
@@ -515,9 +713,13 @@ body {
   cursor: pointer;
 }
 
-.tab.is-active {
+.tab:hover {
   color: var(--ink);
-  border-bottom-color: var(--republic);
+}
+
+.tab.is-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
   background: var(--hull-raised);
 }
 
@@ -528,6 +730,7 @@ body {
   margin-left: 0.3rem;
   border-radius: 50%;
   background: var(--contested);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--contested) 70%, transparent);
   vertical-align: middle;
 }
 
@@ -542,18 +745,27 @@ body {
 
 .placeholder {
   border: 1px dashed var(--line-bright);
-  border-radius: 3px;
   padding: 0.75rem 0.85rem;
 }
 
 .placeholder h4,
 .tab-section h4 {
-  margin: 0 0 0.35rem;
-  font-size: 0.85rem;
+  margin: 0 0 0.5rem;
+  padding-left: 0.55rem;
+  border-left: 2px solid var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink);
 }
 
 .placeholder p {
   margin: 0 0 0.5rem;
+  font-family: var(--sans);
   font-size: 0.82rem;
   color: var(--muted);
 }
@@ -565,7 +777,6 @@ body {
   letter-spacing: 0.12em;
   color: var(--muted);
   border: 1px solid var(--line);
-  border-radius: 2px;
   padding: 0.1rem 0.3rem;
 }
 
@@ -573,22 +784,31 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  border: 1px solid var(--line);
+  background: var(--hull-raised);
+  padding: 0.7rem 0.8rem 0.8rem;
 }
 
 .fleet-order {
   border: 1px solid var(--line);
-  border-left: 2px solid var(--republic);
-  border-radius: 3px;
+  border-left: 3px solid var(--republic);
   padding: 0.6rem 0.7rem;
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
+  background: var(--hull);
 }
 
 .fleet-name {
   margin: 0;
-  font-size: 0.85rem;
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .fleet-buttons {
@@ -618,11 +838,12 @@ body {
 .focus-active-summary {
   margin: 0;
   padding: 0.5rem 0.65rem;
-  border: 1px solid var(--republic);
-  border-radius: 3px;
-  background: var(--republic-dim);
-  font-size: 0.85rem;
-  font-weight: 600;
+  border: 1px solid var(--accent);
+  border-left-width: 3px;
+  background: var(--accent-dim);
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .focus-path {
@@ -633,12 +854,12 @@ body {
 
 .focus-node {
   border: 1px solid var(--line);
-  border-left: 2px solid var(--line-bright);
-  border-radius: 3px;
+  border-left: 3px solid var(--line-bright);
   padding: 0.6rem 0.7rem;
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
+  background: var(--hull);
 }
 
 .focus-node p {
@@ -652,7 +873,7 @@ body {
 
 .focus-node.is-active {
   border-left-color: var(--contested);
-  background: rgba(224, 161, 58, 0.08);
+  background: var(--contested-dim);
 }
 
 .focus-node.is-locked {
@@ -667,8 +888,11 @@ body {
 }
 
 .focus-node-name {
-  font-size: 0.85rem;
-  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .focus-node-tag {
@@ -678,23 +902,28 @@ body {
   letter-spacing: 0.12em;
   color: var(--muted);
   border: 1px solid var(--line);
-  border-radius: 2px;
   padding: 0.1rem 0.3rem;
   white-space: nowrap;
 }
 
 .focus-remaining {
+  font-family: var(--mono);
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--contested);
 }
 
 .combat-orders {
   border: 1px solid var(--directorate);
-  border-left-width: 3px;
-  background: linear-gradient(180deg, var(--directorate-dim), var(--hull) 65%);
-  border-radius: 3px;
+  border-left-width: 4px;
+  background: var(--hull-raised);
   padding: 0.75rem 0.85rem;
+}
+
+.combat-report {
+  border: 1px solid var(--accent);
+  border-left-width: 4px;
+  background: var(--hull-raised);
 }
 
 .combat-sides {
@@ -706,19 +935,23 @@ body {
 
 .combat-side {
   border: 1px solid var(--line-bright);
-  border-radius: 3px;
+  border-left: 3px solid var(--republic);
   padding: 0.55rem 0.65rem;
-  background: rgba(5, 7, 13, 0.4);
+  background: rgba(4, 7, 12, 0.5);
 }
 
 .combat-side-defender {
-  border-color: var(--directorate);
+  border-left-color: var(--directorate);
 }
 
 .combat-side-label {
   margin: 0 0 0.3rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   font-family: var(--mono);
   font-size: 0.6rem;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);
@@ -726,9 +959,10 @@ body {
 
 .combat-strength {
   margin: 0.3rem 0 0;
-  font-size: 1.1rem;
+  font-size: 1.15rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
+  text-align: right;
 }
 
 .stance-choices {
@@ -737,44 +971,87 @@ body {
   gap: 0.5rem;
 }
 
+/* Each stance's border/text color reflects its real casualty multiplier —
+ *  Aggressive costs more lives (critical red), Defensive costs fewer
+ *  (good green), Moderate is the unmodified baseline (accent blue) — not
+ *  just decoration, the same status scale used everywhere else in the app. */
 .stance-button {
   font: inherit;
+  font-family: var(--mono);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 0.3rem;
   padding: 0.55rem 0.5rem;
-  background: var(--directorate);
-  color: var(--space-deep);
-  border: 1px solid var(--directorate);
-  border-radius: 2px;
+  background: var(--hull);
+  color: var(--ink);
+  border: 1px solid var(--line-bright);
+  border-top-width: 3px;
   cursor: pointer;
 }
 
 .stance-button:hover {
-  filter: brightness(1.1);
+  background: var(--hull-raised);
+}
+
+.stance-aggressive {
+  border-top-color: var(--status-critical);
+}
+
+.stance-aggressive .stance-name {
+  color: var(--status-critical);
+}
+
+.stance-moderate {
+  border-top-color: var(--accent);
+}
+
+.stance-moderate .stance-name {
+  color: var(--accent);
+}
+
+.stance-defensive {
+  border-top-color: var(--status-good);
+}
+
+.stance-defensive .stance-name {
+  color: var(--status-good);
 }
 
 .stance-name {
-  font-weight: 600;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.78rem;
 }
 
 .stance-chance {
   font-family: var(--mono);
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
+  color: var(--muted);
 }
 
 /* ---------- decisions ---------- */
 
+.decision {
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  background: var(--hull-raised);
+  padding: 0.85rem 1rem;
+}
+
 .decision h3 {
   margin: 0 0 0.4rem;
+  font-family: var(--sans);
   font-size: 1rem;
+  font-weight: 700;
   text-wrap: balance;
 }
 
 .decision-text {
   margin: 0 0 0.75rem;
+  font-family: var(--sans);
   font-size: 0.86rem;
 }
 
@@ -791,23 +1068,23 @@ body {
   gap: 0.15rem;
   text-align: left;
   font: inherit;
+  font-family: var(--sans);
   padding: 0.55rem 0.7rem;
-  background: var(--hull-raised);
+  background: var(--hull);
   color: var(--ink);
   border: 1px solid var(--line);
   border-left: 3px solid var(--line-bright);
-  border-radius: 2px;
   cursor: pointer;
 }
 
 .choices button:hover {
-  border-left-color: var(--republic);
-  background: var(--republic-dim);
+  border-left-color: var(--accent);
+  background: var(--accent-dim);
 }
 
 .choice-label {
   font-size: 0.85rem;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .choice-effects {
@@ -816,12 +1093,12 @@ body {
   color: var(--muted);
 }
 
-/* ---------- history ---------- */
+/* ---------- mission log ---------- */
 
 .history {
   background: var(--hull);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-top: 2px solid var(--accent);
   padding: 0.85rem 1rem;
 }
 
@@ -829,33 +1106,44 @@ body {
   margin: 0 0 0.5rem;
   font-family: var(--mono);
   font-size: 0.65rem;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.16em;
-  color: var(--muted);
+  letter-spacing: 0.18em;
+  color: var(--accent);
 }
 
 .war-ledger {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem 1.2rem;
-  margin: 0 0 0.65rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.35rem 1.4rem;
+  margin: 0 0 0.7rem;
   padding-bottom: 0.6rem;
-  border-bottom: 1px dashed var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.war-ledger > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
 }
 
 .war-ledger dt {
   font-family: var(--mono);
-  font-size: 0.58rem;
+  font-size: 0.6rem;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   color: var(--muted);
 }
 
 .war-ledger dd {
   margin: 0;
+  font-family: var(--mono);
   font-size: 0.85rem;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 1.2;
+  text-align: right;
 }
 
 .log {
@@ -863,7 +1151,6 @@ body {
   overflow-y: auto;
   background: var(--space);
   border: 1px solid var(--line);
-  border-radius: 2px;
   padding: 0.5rem 0.75rem;
 }
 
@@ -888,16 +1175,20 @@ body {
   align-items: center;
   gap: 0.5rem;
   margin-top: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--line);
 }
 
 .actions button {
   font: inherit;
-  font-weight: 600;
+  font-family: var(--mono);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   padding: 0.55rem 1.1rem;
-  background: var(--republic);
+  background: var(--accent);
   color: var(--space-deep);
-  border: 1px solid var(--republic);
-  border-radius: 2px;
+  border: 1px solid var(--accent);
   cursor: pointer;
 }
 
@@ -906,23 +1197,24 @@ button.ghost {
   background: transparent;
   color: var(--ink);
   border-color: var(--line-bright);
-  font-weight: 400;
+  font-weight: 600;
 }
 
 button.ghost {
   font: inherit;
-  font-size: 0.76rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
   padding: 0.35rem 0.6rem;
   border: 1px solid var(--line-bright);
-  border-radius: 2px;
   background: transparent;
   color: var(--ink);
   cursor: pointer;
 }
 
 button.ghost:hover {
-  border-color: var(--republic);
-  background: var(--republic-dim);
+  border-color: var(--accent);
+  background: var(--accent-dim);
 }
 
 button.ghost.invade {
@@ -952,12 +1244,13 @@ button.ghost.merge:hover {
 
 .quiet {
   margin: 0;
+  font-family: var(--sans);
   color: var(--muted);
   font-size: 0.8rem;
 }
 
 :focus-visible {
-  outline: 2px solid var(--republic);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
@@ -972,6 +1265,16 @@ button.ghost.merge:hover {
 
   .tab-body {
     max-height: none;
+  }
+
+  .status-bar {
+    flex-direction: column;
+  }
+
+  .identity,
+  .clock {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
 }
 
@@ -1002,26 +1305,27 @@ button.ghost.merge:hover {
   max-width: 32rem;
   width: 100%;
   padding: 2rem 2.2rem;
-  border-radius: 4px;
   text-align: center;
   background: var(--hull);
   border: 1px solid var(--line);
+  border-top: 3px solid var(--line-bright);
 }
 
 .end-victory {
-  border-color: var(--republic);
-  background: linear-gradient(180deg, var(--republic-dim), var(--hull) 70%);
+  border-top-color: var(--status-good);
+  background: linear-gradient(180deg, var(--status-good-dim), var(--hull) 70%);
 }
 
 .end-defeat {
-  border-color: var(--directorate);
-  background: linear-gradient(180deg, var(--directorate-dim), var(--hull) 70%);
+  border-top-color: var(--status-critical);
+  background: linear-gradient(180deg, var(--status-critical-dim), var(--hull) 70%);
 }
 
 .end-eyebrow {
   margin: 0 0 0.6rem;
   font-family: var(--mono);
   font-size: 0.7rem;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.18em;
   color: var(--muted);
@@ -1030,19 +1334,21 @@ button.ghost.merge:hover {
 .end-result {
   margin: 0 0 1rem;
   font-size: 2.4rem;
-  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .end-victory .end-result {
-  color: var(--republic);
+  color: var(--status-good);
 }
 
 .end-defeat .end-result {
-  color: var(--directorate);
+  color: var(--status-critical);
 }
 
 .end-reason {
   margin: 0 0 1rem;
+  font-family: var(--sans);
   font-size: 0.95rem;
   color: var(--ink);
 }
@@ -1064,12 +1370,14 @@ button.ghost.merge:hover {
 
 .end-restart {
   font: inherit;
-  font-weight: 600;
+  font-family: var(--mono);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   padding: 0.6rem 1.4rem;
   background: var(--ink);
   color: var(--space-deep);
   border: 1px solid var(--ink);
-  border-radius: 2px;
   cursor: pointer;
 }
 
@@ -1081,7 +1389,7 @@ button.ghost.merge:hover {
   background: transparent;
   color: var(--ink);
   border-color: var(--line-bright);
-  font-weight: 400;
+  font-weight: 600;
 }
 
 .end-actions + .quiet {

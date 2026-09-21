@@ -215,106 +215,123 @@ export default function App() {
           >
             <span style={{ width: `${(state.daysElapsed % 1) * 100}%` }} />
           </div>
+          <p className="speed-label">Speed</p>
           <SpeedControls speed={speed} locked={Boolean(pendingOccupation)} onChange={setSpeed} />
         </div>
 
-        <dl className="briefing">
-          <div>
-            <dt>Materiel</dt>
-            <dd>{formatMoney(state.materiel)}</dd>
-          </div>
-          <div>
-            <dt>Population</dt>
-            <dd>{formatPopulation(state.population)}</dd>
-          </div>
-          <div>
-            <dt>Approval</dt>
-            <dd>{state.approval}</dd>
-          </div>
-          <div>
-            <dt>Leadership</dt>
-            <dd>{state.leadershipPoints}</dd>
-          </div>
-          <div>
-            <dt>Manpower</dt>
-            <dd>{state.manpower}</dd>
-          </div>
-          <div>
-            <dt>War Dead</dt>
-            <dd>
-              {formatPopulation(
-                warTotals.ownKilled + warTotals.enemyKilledEstimate + warTotals.civilianDeaths,
-              )}
-            </dd>
-          </div>
-        </dl>
+        <div className="briefing-block">
+          <p className="module-label">Briefing</p>
+          <dl className="briefing">
+            <div>
+              <dt>Materiel</dt>
+              <dd>{formatMoney(state.materiel)}</dd>
+            </div>
+            <div>
+              <dt>Population</dt>
+              <dd>{formatPopulation(state.population)}</dd>
+            </div>
+            <div>
+              <dt>Approval</dt>
+              <dd>{state.approval}</dd>
+            </div>
+            <div>
+              <dt>Leadership</dt>
+              <dd>{state.leadershipPoints}</dd>
+            </div>
+            <div>
+              <dt>Manpower</dt>
+              <dd>{state.manpower}</dd>
+            </div>
+            <div>
+              <dt>War Dead</dt>
+              <dd>
+                {formatPopulation(
+                  warTotals.ownKilled + warTotals.enemyKilledEstimate + warTotals.civilianDeaths,
+                )}
+              </dd>
+            </div>
+          </dl>
+        </div>
       </header>
 
-      {globalEvent && (
-        <section className="global-banner" aria-label="National decision">
-          <p className="banner-eyebrow">Congress in session — national decision</p>
-          <DecisionCard
-            event={globalEvent}
-            onChoose={(choiceIndex) => dispatch({ type: 'choose', choiceIndex })}
-          />
+      {(globalEvent ||
+        (pendingDirectorateAlert && directorateAttack) ||
+        (pendingSystemId && !decisionVisible) ||
+        (pendingCombat && !combatVisible) ||
+        (pendingOccupation && !occupationVisible) ||
+        (pendingDirectorateCombat && !directorateCombatVisible) ||
+        queuedPanels.length > 0) && (
+        <section className="alert-rail" aria-label="Alerts and pending decisions">
+          {globalEvent && (
+            <section className="global-banner" aria-label="National decision">
+              <p className="banner-eyebrow">Congress in session — national decision</p>
+              <DecisionCard
+                event={globalEvent}
+                onChoose={(choiceIndex) => dispatch({ type: 'choose', choiceIndex })}
+              />
+            </section>
+          )}
+
+          {pendingDirectorateAlert && directorateAttack && (
+            <section className="directorate-alert" aria-label="Naval Intelligence alert" role="status">
+              <p className="banner-eyebrow">{NAVAL_INTELLIGENCE} — fleet movement alert</p>
+              <p>
+                Unidentified Directorate fleet movement detected. Estimated arrival at{' '}
+                {systemName(directorateAttack.systemId)} in{' '}
+                {Math.max(1, Math.ceil(directorateAttack.arrivalDay - state.daysElapsed))} days.
+              </p>
+            </section>
+          )}
+
+          {pendingSystemId && !decisionVisible && (
+            <button className="pending-hint" onClick={openPendingSystem}>
+              Decision pending at {systemName(pendingSystemId)} — open its Political tab
+            </button>
+          )}
+
+          {pendingCombat && !combatVisible && (
+            <button className="pending-hint" onClick={openPendingCombat}>
+              Combat orders pending at {systemName(pendingCombat.systemId)} — open its Military tab
+            </button>
+          )}
+
+          {pendingOccupation && !occupationVisible && (
+            <button className="pending-hint" onClick={openPendingOccupation}>
+              Occupation decision pending at {systemName(pendingOccupation.systemId)} — open its
+              Political tab
+            </button>
+          )}
+
+          {pendingDirectorateCombat && !directorateCombatVisible && (
+            <button className="pending-hint" onClick={openPendingDirectorateCombat}>
+              Directorate attack at {systemName(pendingDirectorateCombat.systemId)} — open its
+              Military tab for combat orders
+            </button>
+          )}
+
+          {queuedPanels.length > 0 && (
+            <p className="queue-indicator" role="status">
+              +{queuedPanels.length} more waiting
+            </p>
+          )}
         </section>
-      )}
-
-      {pendingDirectorateAlert && directorateAttack && (
-        <section className="directorate-alert" aria-label="Naval Intelligence alert" role="status">
-          <p className="banner-eyebrow">{NAVAL_INTELLIGENCE} — fleet movement alert</p>
-          <p>
-            Unidentified Directorate fleet movement detected. Estimated arrival at{' '}
-            {systemName(directorateAttack.systemId)} in{' '}
-            {Math.max(1, Math.ceil(directorateAttack.arrivalDay - state.daysElapsed))} days.
-          </p>
-        </section>
-      )}
-
-      {pendingSystemId && !decisionVisible && (
-        <button className="pending-hint" onClick={openPendingSystem}>
-          Decision pending at {systemName(pendingSystemId)} — open its Political tab
-        </button>
-      )}
-
-      {pendingCombat && !combatVisible && (
-        <button className="pending-hint" onClick={openPendingCombat}>
-          Combat orders pending at {systemName(pendingCombat.systemId)} — open its Military tab
-        </button>
-      )}
-
-      {pendingOccupation && !occupationVisible && (
-        <button className="pending-hint" onClick={openPendingOccupation}>
-          Occupation decision pending at {systemName(pendingOccupation.systemId)} — open its
-          Political tab
-        </button>
-      )}
-
-      {pendingDirectorateCombat && !directorateCombatVisible && (
-        <button className="pending-hint" onClick={openPendingDirectorateCombat}>
-          Directorate attack at {systemName(pendingDirectorateCombat.systemId)} — open its Military
-          tab for combat orders
-        </button>
-      )}
-
-      {queuedPanels.length > 0 && (
-        <p className="queue-indicator" role="status">
-          +{queuedPanels.length} more waiting
-        </p>
       )}
 
       <main className="stage">
-        <SystemMap
-          daysElapsed={state.daysElapsed}
-          selectedId={selectedId}
-          pendingSystemId={pendingSystemId}
-          pendingCombatSystemId={pendingCombat?.systemId ?? null}
-          pendingOccupationSystemId={pendingOccupation?.systemId ?? null}
-          directorateTargetSystemId={directorateAttack?.systemId ?? null}
-          controllerOverrides={session.controllerOverrides}
-          fleets={fleets}
-          onSelect={setSelectedId}
-        />
+        <div className="map-module">
+          <p className="module-label">Sector Map</p>
+          <SystemMap
+            daysElapsed={state.daysElapsed}
+            selectedId={selectedId}
+            pendingSystemId={pendingSystemId}
+            pendingCombatSystemId={pendingCombat?.systemId ?? null}
+            pendingOccupationSystemId={pendingOccupation?.systemId ?? null}
+            directorateTargetSystemId={directorateAttack?.systemId ?? null}
+            controllerOverrides={session.controllerOverrides}
+            fleets={fleets}
+            onSelect={setSelectedId}
+          />
+        </div>
         <SystemPanel
           system={selected}
           daysElapsed={state.daysElapsed}
@@ -375,7 +392,7 @@ export default function App() {
       </main>
 
       <footer className="history">
-        <h2>History</h2>
+        <h2>Mission Log</h2>
         <dl className="war-ledger" aria-label="Running war totals">
           <div>
             <dt>Republic dead / wounded</dt>

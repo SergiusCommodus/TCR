@@ -186,19 +186,29 @@ function CombatOrdersPanel({
       <p className="quiet">{narrative}</p>
       <div className="combat-sides">
         <div className="combat-side">
-          <p className="combat-side-label">{playerLabel}</p>
+          <p className="combat-side-label">
+            <span className="status-dot status-dot-republic" aria-hidden="true" />
+            {playerLabel}
+          </p>
           {playerComposition && <p className="quiet">{describeComposition(playerComposition)}</p>}
           <p className="combat-strength">{Math.round(playerStrength)} strength</p>
         </div>
         <div className="combat-side combat-side-defender">
-          <p className="combat-side-label">{opponentLabel}</p>
+          <p className="combat-side-label">
+            <span className="status-dot status-dot-directorate" aria-hidden="true" />
+            {opponentLabel}
+          </p>
           <p className="combat-strength">{Math.round(opponentStrength)} strength</p>
         </div>
       </div>
       <p className="quiet">Choose a stance — an estimate, not a guarantee:</p>
       <div className="stance-choices">
         {STANCES.map((stance) => (
-          <button key={stance} className="stance-button" onClick={() => onCommit(stance)}>
+          <button
+            key={stance}
+            className={`stance-button stance-${stance}`}
+            onClick={() => onCommit(stance)}
+          >
             <span className="stance-name">{STANCE_LABEL[stance]}</span>
             <span className="stance-chance">
               {estimateWinChance(playerStrength, opponentStrength, stance)}% est. win
@@ -224,7 +234,10 @@ function CombatReportPanel({ report }: { report: CombatReport }) {
       <p className="quiet">{report.headline}</p>
       <div className="combat-sides">
         <div className="combat-side">
-          <p className="combat-side-label">{report.ownLabel}</p>
+          <p className="combat-side-label">
+            <span className="status-dot status-dot-republic" aria-hidden="true" />
+            {report.ownLabel}
+          </p>
           <p className="quiet">
             {formatPopulation(report.ownKilled)} killed, {formatPopulation(report.ownWounded)} wounded
             {report.ownShipsLost > 0
@@ -233,7 +246,10 @@ function CombatReportPanel({ report }: { report: CombatReport }) {
           </p>
         </div>
         <div className="combat-side combat-side-defender">
-          <p className="combat-side-label">{report.enemyLabel}</p>
+          <p className="combat-side-label">
+            <span className="status-dot status-dot-directorate" aria-hidden="true" />
+            {report.enemyLabel}
+          </p>
           <p className="quiet">
             {formatPopulation(report.enemyKilled)} killed, {formatPopulation(report.enemyWounded)} wounded
           </p>
@@ -260,7 +276,10 @@ function GarrisonPanel({
 }) {
   return (
     <section className="tab-section">
-      <h4>Garrison and Ground Defense</h4>
+      <h4>
+        <span className="status-dot status-dot-directorate" aria-hidden="true" /> Garrison and
+        Ground Defense
+      </h4>
       <p className="quiet">
         Naval garrison: {garrisonStrength} strength (~{formatPopulation(navalPersonnel(garrisonStrength))}{' '}
         personnel)
@@ -868,7 +887,10 @@ function MilitaryTab({
           const toLoad = Math.min(room, troopPoolHere);
           return (
           <div key={fleet.id} className="fleet-order">
-            <p className="fleet-name">{fleet.name} — stationed</p>
+            <p className="fleet-name">
+              <span className="status-dot status-dot-republic" aria-hidden="true" />
+              {fleet.name} — stationed
+            </p>
             <p className="quiet">{describeComposition(fleet.composition)}</p>
             <p className="quiet">
               ~{formatPopulation(fleetPersonnel(fleet.composition, fleet.groundTroops))} personnel aboard
@@ -993,7 +1015,10 @@ export default function SystemPanel({
   return (
     <aside className="system-panel">
       <header className={`panel-head head-${controller}`}>
-        <p className="panel-eyebrow">{CONTROLLER_LABEL[controller]}</p>
+        <p className="panel-eyebrow">
+          <span className={`status-dot status-dot-${controller}`} aria-hidden="true" />
+          {CONTROLLER_LABEL[controller]}
+        </p>
         <h2>{system.name}</h2>
         <p className="panel-note">{system.note}</p>
         <dl className="panel-stats">
