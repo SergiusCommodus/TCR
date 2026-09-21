@@ -174,15 +174,18 @@ system; any of those leaves the fleet list untouched.
 
 ## Ship construction
 
-The Military tab shows a Shipyard section only when Sol is selected —
-construction is Sol only for now, enforced both in the UI and, defensively, in
-the reducer. Two ship types, defined as plain data in `src/game/ships.ts`:
-Escort ($150M, 4 days) and Cruiser ($400M, 10 days). Clicking a
-build button deducts the cost immediately (disabled if you can't afford it)
-and adds an order to a build queue, shown under the Shipyard while anything is
-building. The order stores an absolute `completesOnDay`, the same pattern as
-fleet transit, so it counts down on the shared clock rather than a timer of
-its own, and survives a pause exactly like everything else.
+The Military tab shows a Shipyard section only when the selected system has a
+completed Shipyard building (see Buildings below) — enforced both in the UI
+and, defensively, in the reducer. Sol starts with one already built, so
+nothing changes there from before Shipyards existed as a building type; any
+other system needs to build its own first. Two ship types, defined as plain
+data in `src/game/ships.ts`: Escort ($150M, 4 days) and Cruiser ($400M, 10
+days). Clicking a build button deducts the cost immediately (disabled if you
+can't afford it) and adds an order to a build queue, shown under the Shipyard
+while anything is building. The order stores an absolute `completesOnDay`,
+the same pattern as fleet transit, so it counts down on the shared clock
+rather than a timer of its own, and survives a pause exactly like everything
+else.
 
 When a ship completes, it joins a fleet already stationed at that system if
 one exists — First Fleet at Sol, at the start of a game — or forms a new one
@@ -191,6 +194,56 @@ first, then keep incrementing, skipping any ordinal already in use (Third
 Fleet is taken from the start, so the next new fleet after Second is Fourth).
 Completion is logged: "Escort construction complete at Sol, assigned to First
 Fleet." or "... forms Second Fleet."
+
+## Buildings
+
+A tycoon layer under the war: each Republic controlled system has a fixed
+number of building slots (`SystemDef.buildingSlots` in `src/game/systems.ts`
+— 6 at Sol down to 2 at Anchorage, sized loosely with the same development
+level population is) and a Buildings tab to fill them. Four types, defined
+in `src/game/buildings.ts`:
+
+| Building | Cost | Build time | Effect |
+| --- | --- | --- | --- |
+| Factory | $600M | 12 days | +$25M materiel/day |
+| Mine | $300M | 7 days | +$14M materiel/day |
+| Shipyard | $500M | 14 days | None directly — required for ship construction at this system |
+| Civic Infrastructure | $250M | 6 days | +0.2 approval/day, +500K population/day |
+
+Factory and Mine both produce materiel — there's only the one resource, not
+a separate "raw" and "refined" pair — Factory simply costs and takes longer
+to build for a better daily rate; Mine is the cheaper, faster early pick.
+Queueing a building deducts its cost immediately (disabled in the UI if you
+can't afford it, if the system has no free slot — a building still under
+construction reserves its slot the same as a completed one — or, for
+Shipyard specifically, if one is already there or already queued) and adds
+an order to that system's queue, shown under its Buildings tab. Orders store
+an absolute `completesOnDay`, the same pattern ship construction and ground
+troop training already use, so they count down on the shared clock rather
+than a timer of their own.
+
+Once complete, a building generates its effect automatically every day
+boundary — no further input — for as long as its system reads Republic
+controlled by its live controller (`buildingIncomeFor` in `src/game/state.ts`,
+applied in `runClock` alongside `DAILY_UPKEEP`, the same day-boundary
+granularity as everything else on the clock; a Factory at a system later
+lost to the Directorate stops contributing, the same rule fleet arrivals
+already use to decide whether landing somewhere means combat). One combined
+log line per day boundary ("System infrastructure reports (materiel
++$39M, ...)") covers every system's buildings at once, the same way "The war
+effort grinds on" covers `DAILY_UPKEEP` — not one line per system per day,
+which would flood the log on a long game. The Buildings tab itself also
+breaks a system's own income out per building, alongside its build queue and
+a "N of M slots used" readout.
+
+Queueing a building, and a building completing, are both ordinary actions on
+the shared clock: neither one touches speed, opens a panel, or interacts
+with the panel queue (`GameSession.queuedPanels`) in any way — a system
+panel opened to check on or manage buildings never displaces a pending
+decision, sensor ping, or combat panel elsewhere, and none of those interrupt
+building construction either. A hostile or contested system's Buildings tab
+shows a plain notice instead of the build UI: buildings are Republic
+controlled systems only.
 
 ## Combat
 
@@ -596,8 +649,11 @@ or a message naming the problem if the saved data doesn't parse or validate
   (`queuedPanels`, promoted front first as the active one resolves — see The
   clock above), queued delayed effects, fleets, the ship build queue, the
   ground troop training queue (`trainingQueue`) and pool (`groundTroopPool`,
-  per system id), current garrison and ground defense strength per system,
-  each system's live controller override, the standing tax policy, National
+  per system id), completed buildings per system id (`buildings`) and the
+  buildings still under construction across every system (`buildingQueue`
+  — see Buildings above), current garrison and ground defense strength per
+  system, each system's live controller override, the standing tax policy,
+  National
   Focus progress (`completedFocusIds`, `activeFocus`), the Directorate's own
   fleet strength, next check day, in-flight attack and pending alert, the
   approval collapse tracker (`approvalCollapseStartDay`), and `gameOver` once
@@ -660,7 +716,9 @@ concerns. An event id missing from that map falls back to `'global'`.
   `formatMoney`/`formatPopulation`/`formatMagnitude` display helpers, kept
   separate from `state.ts` to avoid a circular import.
 - `src/game/systems.ts` — systems, controllers, map positions, event scope,
-  and each system's flavor-only `population`.
+  each system's flavor-only `population`, and its `buildingSlots`.
+- `src/game/buildings.ts` — `BUILDING_TYPES`: cost, build time and daily
+  effect per building type.
 - `src/game/fleets.ts` — transit, naming and composition helpers shared by
   the map and the panel, including `groundTroopCapacity`.
 - `src/game/travel.ts` — the per-pair travel time table and lane list.
@@ -684,8 +742,8 @@ concerns. An event id missing from that map falls back to `'global'`.
 - `src/game/gameEnd.ts` — `checkGameEnd`, the pure win/lose condition check
   run after every action by the reducer wrapper in `state.ts`.
 - `src/components/` — `SystemMap`, `SystemPanel` (tabs, including the
-  Shipyard, Invade, Tax Policy, Focus tree and combat stance controls),
-  `SpeedControls`, `DecisionCard` (shared by the Political tab and the
-  national banner), `EndScreen` (replaces the whole view once `gameOver` is
-  set); the map also shows an "incoming" marker on a system targeted by a
+  Shipyard, Buildings, Invade, Tax Policy, Focus tree and combat stance
+  controls), `SpeedControls`, `DecisionCard` (shared by the Political tab and
+  the national banner), `EndScreen` (replaces the whole view once `gameOver`
+  is set); the map also shows an "incoming" marker on a system targeted by a
   Directorate attack.

@@ -14,6 +14,7 @@ import {
   rollDirectorateCheckInterval,
   rollDirectorateOccupationOutcome,
 } from './directorate';
+import { BUILDING_TYPES } from './buildings';
 import { EVENTS, findEvent } from './events';
 import { FOCUS_PATH } from './focuses';
 import { checkGameEnd } from './gameEnd';
@@ -31,12 +32,15 @@ import { MAT_SCALE, POP_SCALE, formatMagnitude, formatMoney, formatPopulation } 
 import { SHIP_TYPES } from './ships';
 import { STANCE_LABEL, resolveStanceCombat } from './stance';
 import { HOME_SYSTEM_ID, SYSTEMS, currentController, systemById, systemName } from './systems';
+import type { Controller } from './systems';
 import { TROOP_TRAINING } from './troops';
 import { nearestOtherSystem, travelDays } from './travel';
 import type { CombatStance } from './stance';
 import type { ShipComposition } from './types';
 import type {
   ActiveFocus,
+  BuildingOrder,
+  BuildingType,
   BuildOrder,
   Effects,
   EventDef,
@@ -48,6 +52,7 @@ import type {
   PendingDirectorateAlert,
   PendingDirectorateCombat,
   PendingPanelItem,
+  PlacedBuilding,
   QueuedEffects,
   ShipType,
   Speed,
@@ -147,6 +152,32 @@ export function buildTimeMultiplierFor(completedFocusIds: string[]): number {
     }
   }
   return multiplier;
+}
+
+/** The combined daily effect of every completed building across every
+ *  Republic controlled system — checked by live controller, not a system's
+ *  static baseline, the same rule fleet arrivals already use, so a system
+ *  lost to the Directorate stops contributing (though its buildings aren't
+ *  removed; they'd resume producing if it were ever retaken) and one just
+ *  flipped by Occupy and Govern starts immediately. Applied alongside
+ *  DAILY_UPKEEP at each day boundary in runClock, not folded into
+ *  dailyUpkeepFor itself, since that function is keyed by tax policy and
+ *  completed focuses alone and has no system-level knowledge. */
+export function buildingIncomeFor(
+  buildings: Record<string, PlacedBuilding[]>,
+  controllerOverrides: Record<string, Controller>,
+): Effects {
+  const total: Effects = {};
+  for (const system of SYSTEMS) {
+    if (currentController(system, controllerOverrides) !== 'republic') continue;
+    for (const building of buildings[system.id] ?? []) {
+      const def = BUILDING_TYPES[building.type];
+      if (def.materielPerDay) total.materiel = (total.materiel ?? 0) + def.materielPerDay;
+      if (def.approvalPerDay) total.approval = (total.approval ?? 0) + def.approvalPerDay;
+      if (def.populationPerDay) total.population = (total.population ?? 0) + def.populationPerDay;
+    }
+  }
+  return total;
 }
 
 const INITIAL_FLEETS: Fleet[] = [
@@ -262,6 +293,12 @@ export function initialSession(): GameSession {
     fleets: INITIAL_FLEETS,
     buildQueue: [],
     trainingQueue: [],
+    // Sol starts with a completed Shipyard so ship construction there is
+    // available immediately, exactly as before buildShip started requiring
+    // one — every other system needs to build its own before it can build
+    // ships at all.
+    buildings: { [HOME_SYSTEM_ID]: [{ id: 'starting-shipyard', type: 'shipyard' }] },
+    buildingQueue: [],
     groundTroopPool: {},
     nextFleetNumber: INITIAL_NEXT_FLEET_NUMBER,
     garrisons: initialGarrisons(),
@@ -312,11 +349,13 @@ function isValidSession(value: unknown): value is GameSession {
 
   const arrayFields = [
     'firedEventIds', 'queued', 'fleets', 'buildQueue', 'trainingQueue',
-    'completedFocusIds', 'queuedPanels',
+    'completedFocusIds', 'queuedPanels', 'buildingQueue',
   ];
   if (!arrayFields.every((key) => Array.isArray(s[key]))) return false;
 
-  const objectFields = ['groundTroopPool', 'garrisons', 'groundDefenses', 'controllerOverrides'];
+  const objectFields = [
+    'groundTroopPool', 'garrisons', 'groundDefenses', 'controllerOverrides', 'buildings',
+  ];
   if (!objectFields.every((key) => s[key] !== null && typeof s[key] === 'object')) return false;
 
   const numberFields = [
@@ -486,6 +525,8 @@ export function runClock(session: GameSession, realMs: number): GameSession {
   let fleets = session.fleets;
   let buildQueue: BuildOrder[] = session.buildQueue;
   let trainingQueue: TroopTrainingOrder[] = session.trainingQueue;
+  let buildingQueue: BuildingOrder[] = session.buildingQueue;
+  let buildings = session.buildings;
   let groundTroopPool = session.groundTroopPool;
   let nextFleetNumber = session.nextFleetNumber;
   let firedEventIds = session.firedEventIds;
@@ -650,6 +691,22 @@ export function runClock(session: GameSession, realMs: number): GameSession {
       }
     }
 
+    const dueBuildings = buildingQueue.filter((order) => order.completesOnDay <= atDay);
+    if (dueBuildings.length > 0) {
+      buildingQueue = buildingQueue.filter((order) => order.completesOnDay > atDay);
+      for (const order of dueBuildings) {
+        const def = BUILDING_TYPES[order.buildingType];
+        buildings = {
+          ...buildings,
+          [order.systemId]: [...(buildings[order.systemId] ?? []), { id: order.id, type: order.buildingType }],
+        };
+        log.push(
+          `Day ${dayLabel(order.completesOnDay)} — ${def.name} construction complete at ` +
+            `${systemName(order.systemId)}.`,
+        );
+      }
+    }
+
     const dueTraining = trainingQueue.filter((order) => order.completesOnDay <= atDay);
     if (dueTraining.length > 0) {
       trainingQueue = trainingQueue.filter((order) => order.completesOnDay > atDay);
@@ -748,6 +805,18 @@ export function runClock(session: GameSession, realMs: number): GameSession {
     // isn't part of GameState and the player never sees it directly.
     directorateFleetStrength += DIRECTORATE_FLEET_GROWTH_PER_DAY;
     log.push(`Day ${boundary} — The war effort grinds on (${describeEffects(upkeep)}).`);
+
+    // Building income lands alongside daily upkeep, computed from whatever
+    // was already complete coming into today — a building settleDueWork
+    // finishes later in this same boundary starts earning from the next
+    // one, the same "was it there at the start of the day" rule upkeep
+    // itself effectively follows.
+    const buildingIncome = buildingIncomeFor(buildings, controllerOverrides);
+    if (Object.keys(buildingIncome).length > 0) {
+      resources = applyEffects(resources, buildingIncome);
+      log.push(`Day ${boundary} — System infrastructure reports (${describeEffects(buildingIncome)}).`);
+    }
+
     settleDueWork(boundary);
 
     // Tracked at whole day precision, the same granularity as everything
@@ -794,6 +863,8 @@ export function runClock(session: GameSession, realMs: number): GameSession {
     fleets,
     buildQueue,
     trainingQueue,
+    buildingQueue,
+    buildings,
     groundTroopPool,
     nextFleetNumber,
     firedEventIds,
@@ -817,6 +888,7 @@ export type GameAction =
   | { type: 'assignFleet'; fleetId: string; destinationId: string }
   | { type: 'mergeFleets'; fleetIds: string[]; keepFleetId: string }
   | { type: 'buildShip'; systemId: string; shipType: ShipType }
+  | { type: 'queueBuilding'; systemId: string; buildingType: BuildingType }
   | { type: 'trainTroops'; systemId: string }
   | { type: 'loadTroops'; fleetId: string }
   | { type: 'commitAttack'; stance: CombatStance }
@@ -945,9 +1017,16 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
     }
 
     case 'buildShip': {
-      // Construction is Sol only for now; enforced here too, not just by
-      // which system shows the Build panel.
-      if (action.systemId !== HOME_SYSTEM_ID) return session;
+      // Requires a completed Shipyard at this system, and the system still
+      // Republic controlled — enforced here too, not just by which system
+      // shows the Build panel. Sol starts with a Shipyard already built
+      // (see initialSession), so this is unchanged there from before
+      // Shipyards existed; every other system needs to build its own first.
+      const system = systemById(action.systemId);
+      const hasShipyard = (session.buildings[action.systemId] ?? []).some((b) => b.type === 'shipyard');
+      if (!system || currentController(system, session.controllerOverrides) !== 'republic' || !hasShipyard) {
+        return session;
+      }
       const def = SHIP_TYPES[action.shipType];
       if (
         session.state.materiel < def.materielCost ||
@@ -979,6 +1058,48 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
         ...session,
         state: { ...applyEffects(session.state, cost), log },
         buildQueue: [...session.buildQueue, order],
+      };
+    }
+
+    case 'queueBuilding': {
+      // Only ever offered in the UI for a Republic controlled system with a
+      // free slot, but re-checked here defensively, the same posture every
+      // other paid action takes. Deliberately untouched by any pending
+      // panel — a building queues the instant it's ordered whether or not a
+      // decision, alert or combat panel happens to be open, the same "keeps
+      // advancing in the background" rule everything else on the clock now
+      // follows; it plays no part in the panel queue at all.
+      const system = systemById(action.systemId);
+      if (!system || currentController(system, session.controllerOverrides) !== 'republic') {
+        return session;
+      }
+
+      const completed = session.buildings[action.systemId] ?? [];
+      const queuedHere = session.buildingQueue.filter((o) => o.systemId === action.systemId);
+      if (completed.length + queuedHere.length >= system.buildingSlots) return session;
+
+      const def = BUILDING_TYPES[action.buildingType];
+      if (session.state.materiel < def.materielCost) return session;
+
+      const days = session.state.daysElapsed;
+      const order: BuildingOrder = {
+        id: `building-${action.buildingType}-${Math.round(days * 1000)}-${session.buildingQueue.length}`,
+        systemId: action.systemId,
+        buildingType: action.buildingType,
+        completesOnDay: days + def.buildDays,
+      };
+      const cost: Effects = { materiel: -def.materielCost };
+      const log = [
+        ...session.state.log,
+        `Day ${dayLabel(days)} — ${def.name} construction begun at ` +
+          `${systemName(action.systemId)} (${describeEffects(cost)}); complete in ` +
+          `${def.buildDays} days.`,
+      ];
+
+      return {
+        ...session,
+        state: { ...applyEffects(session.state, cost), log },
+        buildingQueue: [...session.buildingQueue, order],
       };
     }
 

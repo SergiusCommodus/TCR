@@ -1,3 +1,4 @@
+import { BUILDING_TYPE_LIST, BUILDING_TYPES } from '../game/buildings';
 import { DIRECTORATE_NAVAL_SHARE } from '../game/directorate';
 import { findEvent } from '../game/events';
 import {
@@ -13,7 +14,7 @@ import { occupationEventFor } from '../game/occupation';
 import { formatMoney, formatPopulation } from '../game/scale';
 import { SHIP_TYPE_LIST, SHIP_TYPES } from '../game/ships';
 import { STANCES, STANCE_LABEL, estimateWinChance } from '../game/stance';
-import { TAX_POLICIES, TAX_POLICY_LABEL, buildTimeMultiplierFor } from '../game/state';
+import { describeEffects, TAX_POLICIES, TAX_POLICY_LABEL, buildTimeMultiplierFor } from '../game/state';
 import {
   CONTROLLER_LABEL,
   HOME_SYSTEM_ID,
@@ -27,11 +28,15 @@ import type { Controller, SystemDef } from '../game/systems';
 import type { CombatStance } from '../game/stance';
 import type {
   ActiveFocus,
+  BuildingOrder,
+  BuildingType,
   BuildOrder,
+  Effects,
   Fleet,
   PendingCombat,
   PendingDirectorateCombat,
   PendingOccupation,
+  PlacedBuilding,
   ShipType,
   TaxPolicy,
   TroopTrainingOrder,
@@ -65,6 +70,8 @@ interface Props {
   buildQueue: BuildOrder[];
   trainingQueue: TroopTrainingOrder[];
   groundTroopPool: Record<string, number>;
+  buildings: Record<string, PlacedBuilding[]>;
+  buildingQueue: BuildingOrder[];
   taxPolicy: TaxPolicy;
   completedFocusIds: string[];
   activeFocus: ActiveFocus | null;
@@ -74,6 +81,7 @@ interface Props {
   onChoose: (choiceIndex: number) => void;
   onAssignFleet: (fleetId: string, destinationId: string) => void;
   onBuildShip: (systemId: string, shipType: ShipType) => void;
+  onQueueBuilding: (systemId: string, buildingType: BuildingType) => void;
   onTrainTroops: (systemId: string) => void;
   onLoadTroops: (fleetId: string) => void;
   onCommitAttack: (stance: CombatStance) => void;
@@ -104,6 +112,7 @@ interface MilitaryProps {
   buildQueue: BuildOrder[];
   trainingQueue: TroopTrainingOrder[];
   groundTroopPool: Record<string, number>;
+  buildingsHere: PlacedBuilding[];
   completedFocusIds: string[];
   pendingCombat: PendingCombat | null;
   pendingDirectorateCombat: PendingDirectorateCombat | null;
@@ -203,7 +212,7 @@ function BuildPanel({
   return (
     <section className="tab-section">
       <h4>Shipyard</h4>
-      <p className="quiet">Construction is available at Sol for now.</p>
+      <p className="quiet">Ship construction is available here — see Buildings for the Shipyard itself.</p>
       <div className="fleet-buttons">
         {SHIP_TYPE_LIST.map((def) => {
           const affordable = materiel >= def.materielCost && manpower >= def.manpowerCost;
@@ -297,6 +306,128 @@ function TroopTrainingPanel({
             return (
               <p key={order.id} className="quiet">
                 {TROOP_TRAINING.count} troops, {remaining} day{remaining === 1 ? '' : 's'} remaining.
+              </p>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** A completed building's own daily effect, described the same way any
+ *  other Effects object is — "materiel +$14M", "approval +0.2, population
+ *  +500K" — or a plain note for Shipyard, which produces no numeric effect
+ *  at all. */
+function buildingEffectText(buildingType: BuildingType): string {
+  const def = BUILDING_TYPES[buildingType];
+  if (buildingType === 'shipyard') return 'Enables ship construction here';
+  const effects: Effects = {
+    materiel: def.materielPerDay,
+    approval: def.approvalPerDay,
+    population: def.populationPerDay,
+  };
+  return describeEffects(effects);
+}
+
+function BuildingsPanel({
+  system,
+  daysElapsed,
+  materiel,
+  buildingsHere,
+  queueHere,
+  isRepublic,
+  onQueueBuilding,
+}: {
+  system: SystemDef;
+  daysElapsed: number;
+  materiel: number;
+  buildingsHere: PlacedBuilding[];
+  queueHere: BuildingOrder[];
+  isRepublic: boolean;
+  onQueueBuilding: (systemId: string, buildingType: BuildingType) => void;
+}) {
+  if (!isRepublic) {
+    return (
+      <section className="tab-section">
+        <h4>Buildings</h4>
+        <p className="quiet">
+          {system.name} isn't under Republic control — buildings can only be queued once it is.
+        </p>
+      </section>
+    );
+  }
+
+  const usedSlots = buildingsHere.length + queueHere.length;
+  const hasShipyard = buildingsHere.some((b) => b.type === 'shipyard') || queueHere.some((o) => o.buildingType === 'shipyard');
+  const totalIncome: Effects = {};
+  for (const building of buildingsHere) {
+    const def = BUILDING_TYPES[building.type];
+    if (def.materielPerDay) totalIncome.materiel = (totalIncome.materiel ?? 0) + def.materielPerDay;
+    if (def.approvalPerDay) totalIncome.approval = (totalIncome.approval ?? 0) + def.approvalPerDay;
+    if (def.populationPerDay) totalIncome.population = (totalIncome.population ?? 0) + def.populationPerDay;
+  }
+
+  return (
+    <section className="tab-section">
+      <h4>Buildings</h4>
+      <p className="quiet">
+        {usedSlots} of {system.buildingSlots} slots used.
+      </p>
+      {buildingsHere.length > 0 && (
+        <p className="quiet">This system generates {describeEffects(totalIncome)} per day.</p>
+      )}
+
+      <div className="fleet-buttons">
+        {BUILDING_TYPE_LIST.map((def) => {
+          const affordable = materiel >= def.materielCost;
+          const slotFree = usedSlots < system.buildingSlots;
+          const redundantShipyard = def.id === 'shipyard' && hasShipyard;
+          const disabled = !affordable || !slotFree || redundantShipyard;
+          const title = redundantShipyard
+            ? 'Already has a Shipyard'
+            : !slotFree
+              ? 'No free building slot'
+              : !affordable
+                ? 'Not enough materiel'
+                : undefined;
+          return (
+            <button
+              key={def.id}
+              className="ghost"
+              disabled={disabled}
+              title={title}
+              onClick={() => onQueueBuilding(system.id, def.id)}
+            >
+              Build {def.name} · {formatMoney(def.materielCost)}, {def.buildDays}d
+            </button>
+          );
+        })}
+      </div>
+
+      {queueHere.length > 0 && (
+        <div className="build-queue">
+          <p className="quiet">Under construction:</p>
+          {queueHere.map((order) => {
+            const def = BUILDING_TYPES[order.buildingType];
+            const remaining = daysUntil(order.completesOnDay, daysElapsed);
+            return (
+              <p key={order.id} className="quiet">
+                {def.name}, {remaining} day{remaining === 1 ? '' : 's'} remaining.
+              </p>
+            );
+          })}
+        </div>
+      )}
+
+      {buildingsHere.length > 0 && (
+        <div className="build-queue">
+          <p className="quiet">Completed, broken out by building:</p>
+          {buildingsHere.map((building) => {
+            const def = BUILDING_TYPES[building.type];
+            return (
+              <p key={building.id} className="quiet">
+                {def.name} — {buildingEffectText(building.type)}
               </p>
             );
           })}
@@ -429,6 +560,7 @@ function MilitaryTab({
   buildQueue,
   trainingQueue,
   groundTroopPool,
+  buildingsHere,
   completedFocusIds,
   pendingCombat,
   pendingDirectorateCombat,
@@ -454,6 +586,7 @@ function MilitaryTab({
   const directorateCombatHere = pendingDirectorateCombat?.systemId === system.id;
   const defendingStrengthHere = stationed.reduce((sum, f) => sum + fleetStrength(f.composition), 0);
   const troopPoolHere = groundTroopPool[system.id] ?? 0;
+  const hasShipyard = buildingsHere.some((b) => b.type === 'shipyard');
 
   return (
     <>
@@ -486,7 +619,7 @@ function MilitaryTab({
         Ground formations, fortifications, and the local order of battle will live here.
       </Placeholder>
 
-      {system.id === HOME_SYSTEM_ID && (
+      {hasShipyard && (
         <BuildPanel
           system={system}
           daysElapsed={daysElapsed}
@@ -621,6 +754,8 @@ export default function SystemPanel({
   buildQueue,
   trainingQueue,
   groundTroopPool,
+  buildings,
+  buildingQueue,
   taxPolicy,
   completedFocusIds,
   activeFocus,
@@ -630,6 +765,7 @@ export default function SystemPanel({
   onChoose,
   onAssignFleet,
   onBuildShip,
+  onQueueBuilding,
   onTrainTroops,
   onLoadTroops,
   onCommitAttack,
@@ -644,6 +780,8 @@ export default function SystemPanel({
   const controller = currentController(system, controllerOverrides);
   const isHostile = controller !== 'republic';
   const occupationEvent = pendingOccupation ? occupationEventFor(system.name) : undefined;
+  const buildingsHere = buildings[system.id] ?? [];
+  const buildingQueueHere = buildingQueue.filter((o) => o.systemId === system.id);
 
   return (
     <aside className="system-panel">
@@ -706,6 +844,7 @@ export default function SystemPanel({
             buildQueue={buildQueue}
             trainingQueue={trainingQueue}
             groundTroopPool={groundTroopPool}
+            buildingsHere={buildingsHere}
             completedFocusIds={completedFocusIds}
             pendingCombat={pendingCombat}
             pendingDirectorateCombat={pendingDirectorateCombat}
@@ -725,9 +864,15 @@ export default function SystemPanel({
         )}
 
         {tab === 'Buildings' && (
-          <Placeholder title="Construction">
-            Shipyards, factories, and defensive works will be queued and built here.
-          </Placeholder>
+          <BuildingsPanel
+            system={system}
+            daysElapsed={daysElapsed}
+            materiel={materiel}
+            buildingsHere={buildingsHere}
+            queueHere={buildingQueueHere}
+            isRepublic={!isHostile}
+            onQueueBuilding={onQueueBuilding}
+          />
         )}
 
         {tab === 'Economy' && (

@@ -98,6 +98,35 @@ export interface TroopTrainingOrder {
   completesOnDay: number;
 }
 
+/** The four buildable building types — see BUILDING_TYPES in buildings.ts
+ *  for each one's cost, build time and effect. Factory and Mine both
+ *  produce materiel (factory more, mine less, flavored as refined output
+ *  versus raw extraction — there is only the one materiel resource, not two
+ *  separate ones); Shipyard produces nothing but gates ship construction at
+ *  its system; Civic boosts population and approval income. */
+export type BuildingType = 'factory' | 'mine' | 'shipyard' | 'civic';
+
+/** A completed building at a system, counted against that system's
+ *  buildingSlots (see SystemDef) alongside anything still under
+ *  construction in GameSession.buildingQueue. Plain data — its ongoing
+ *  effect is read from BUILDING_TYPES by type, not stored per instance. */
+export interface PlacedBuilding {
+  id: string;
+  type: BuildingType;
+}
+
+/** A building under construction at a system, counting down on the same day
+ *  based clock as ship construction and ground troop training. Reserves a
+ *  slot the same way a completed building does — see queueBuilding in
+ *  state.ts. */
+export interface BuildingOrder {
+  id: string;
+  systemId: string;
+  buildingType: BuildingType;
+  /** Absolute day the building joins GameSession.buildings for its system. */
+  completesOnDay: number;
+}
+
 /** A fleet that has reached a Directorate or contested system and is
  *  waiting for the player to commit to attack, or not. Doesn't pause the
  *  clock — see PendingPanelItem and GameSession.queuedPanels. */
@@ -244,6 +273,17 @@ export interface GameSession {
    *  currently active. Promoted into the active slot, front first, the
    *  moment that one resolves — see promoteNextPanel in state.ts. */
   queuedPanels: PendingPanelItem[];
+  /** Completed buildings per system id, sparse (a system absent here has
+   *  none). Generates its effect automatically every day boundary while the
+   *  system is Republic controlled — see buildingIncomeFor in state.ts —
+   *  entirely independent of the panel queue above: queueing or completing
+   *  a building never touches speed, pauses anything, or opens a panel. */
+  buildings: Record<string, PlacedBuilding[]>;
+  /** Buildings under construction, across every system at once (unlike
+   *  buildQueue and trainingQueue, which are Sol/shipyard-system specific in
+   *  practice but not filtered by system here either) — each entry's own
+   *  systemId says where it lands. */
+  buildingQueue: BuildingOrder[];
   /** The absolute day approval first read at or below zero, cleared the
    *  moment it rises back above zero. Null while approval is healthy. Used
    *  to judge internal collapse: see APPROVAL_COLLAPSE_DAYS in gameEnd.ts. */

@@ -30,6 +30,12 @@ export interface SystemDef {
    *  the same way a Republic system's absent garrisonStrength isn't summed
    *  into anything either. */
   population: number;
+  /** Fixed number of building slots this system has, for GameSession.buildings
+   *  plus anything still under construction in GameSession.buildingQueue —
+   *  sized loosely by the same development level population is. Available
+   *  once the system is Republic controlled (see currentController below);
+   *  building at a hostile or contested one isn't offered in the UI. */
+  buildingSlots: number;
 }
 
 export const CONTROLLER_LABEL: Record<Controller, string> = {
@@ -47,6 +53,7 @@ export const SYSTEMS: SystemDef[] = [
     x: 34,
     y: 58,
     population: 2_800_000_000,
+    buildingSlots: 6,
   },
   {
     id: 'new-virginia',
@@ -58,6 +65,7 @@ export const SYSTEMS: SystemDef[] = [
     garrisonStrength: 8,
     groundDefense: 6,
     population: 240_000_000,
+    buildingSlots: 4,
   },
   {
     id: 'anchorage',
@@ -67,6 +75,7 @@ export const SYSTEMS: SystemDef[] = [
     x: 18,
     y: 22,
     population: 3_000_000,
+    buildingSlots: 2,
   },
   {
     id: 'shiloh',
@@ -78,6 +87,7 @@ export const SYSTEMS: SystemDef[] = [
     garrisonStrength: 4,
     groundDefense: 3,
     population: 60_000_000,
+    buildingSlots: 3,
   },
   {
     id: 'meridian',
@@ -87,6 +97,7 @@ export const SYSTEMS: SystemDef[] = [
     x: 14,
     y: 78,
     population: 140_000_000,
+    buildingSlots: 4,
   },
   {
     id: 'vicksburg',
@@ -98,6 +109,7 @@ export const SYSTEMS: SystemDef[] = [
     garrisonStrength: 5,
     groundDefense: 4,
     population: 95_000_000,
+    buildingSlots: 4,
   },
 ];
 
