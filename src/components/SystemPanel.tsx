@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { BUILDING_TYPE_LIST, BUILDING_TYPES } from '../game/buildings';
 import { DIRECTORATE_NAVAL_SHARE } from '../game/directorate';
 import { findEvent } from '../game/events';
@@ -38,6 +39,7 @@ import type {
   PendingOccupation,
   PlacedBuilding,
   ShipType,
+  StandingShipOrder,
   TaxPolicy,
   TroopTrainingOrder,
 } from '../game/types';
@@ -68,6 +70,7 @@ interface Props {
   controllerOverrides: Record<string, Controller>;
   fleets: Fleet[];
   buildQueue: BuildOrder[];
+  standingShipOrders: Record<string, StandingShipOrder>;
   trainingQueue: TroopTrainingOrder[];
   groundTroopPool: Record<string, number>;
   buildings: Record<string, PlacedBuilding[]>;
@@ -81,6 +84,8 @@ interface Props {
   onChoose: (choiceIndex: number) => void;
   onAssignFleet: (fleetId: string, destinationId: string) => void;
   onBuildShip: (systemId: string, shipType: ShipType) => void;
+  onSetStandingShipOrder: (systemId: string, sequence: ShipType[]) => void;
+  onCancelStandingShipOrder: (systemId: string) => void;
   onQueueBuilding: (systemId: string, buildingType: BuildingType) => void;
   onTrainTroops: (systemId: string) => void;
   onLoadTroops: (fleetId: string) => void;
@@ -110,6 +115,7 @@ interface MilitaryProps {
   manpower: number;
   fleets: Fleet[];
   buildQueue: BuildOrder[];
+  standingShipOrders: Record<string, StandingShipOrder>;
   trainingQueue: TroopTrainingOrder[];
   groundTroopPool: Record<string, number>;
   buildingsHere: PlacedBuilding[];
@@ -122,6 +128,8 @@ interface MilitaryProps {
   isHostile: boolean;
   onAssignFleet: (fleetId: string, destinationId: string) => void;
   onBuildShip: (systemId: string, shipType: ShipType) => void;
+  onSetStandingShipOrder: (systemId: string, sequence: ShipType[]) => void;
+  onCancelStandingShipOrder: (systemId: string) => void;
   onTrainTroops: (systemId: string) => void;
   onLoadTroops: (fleetId: string) => void;
   onCommitAttack: (stance: CombatStance) => void;
@@ -189,22 +197,115 @@ function CombatOrdersPanel({
   );
 }
 
+/**
+ * Sets, changes or cancels a system's standing ship production order — a
+ * repeating sequence the Shipyard keeps building automatically, one ship at
+ * a time, without the player reissuing it. Before one is set, ship type
+ * buttons build up a draft sequence (local UI state only, discarded on
+ * confirm); once one is set, this shows what it's producing and how many
+ * days remain, or that it's waiting on materiel, plus a Cancel button.
+ */
+function StandingOrderControl({
+  system,
+  daysElapsed,
+  standingOrder,
+  queueHere,
+  onSet,
+  onCancel,
+}: {
+  system: SystemDef;
+  daysElapsed: number;
+  standingOrder: StandingShipOrder | undefined;
+  queueHere: BuildOrder[];
+  onSet: (systemId: string, sequence: ShipType[]) => void;
+  onCancel: (systemId: string) => void;
+}) {
+  const [draft, setDraft] = useState<ShipType[]>([]);
+
+  if (standingOrder) {
+    const label = standingOrder.sequence.map((t) => SHIP_TYPES[t].name).join(' → ');
+    // The order's own in-flight build, if any — see BuildOrder.origin in
+    // types.ts. Waiting on materiel shows no in-flight order at all, since
+    // the refill check in runClock skips queueing one until affordable.
+    const current = queueHere.find((order) => order.origin === 'standing');
+
+    return (
+      <div className="standing-order">
+        <p className="quiet">Standing order: {label} (repeating).</p>
+        {current ? (
+          (() => {
+            const remaining = buildDaysOut(current, daysElapsed);
+            return (
+              <p className="quiet">
+                Currently producing {SHIP_TYPES[current.shipType].name} — {remaining} day
+                {remaining === 1 ? '' : 's'} remaining.
+              </p>
+            );
+          })()
+        ) : (
+          <p className="quiet">Waiting for materiel — will resume automatically once affordable.</p>
+        )}
+        <div className="fleet-buttons">
+          <button className="ghost" onClick={() => onCancel(system.id)}>
+            Cancel Standing Order
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="standing-order">
+      <p className="quiet">
+        Set a repeating standing order and the Shipyard keeps building it automatically, one ship
+        at a time, resuming on its own if materiel runs short.
+      </p>
+      <div className="fleet-buttons">
+        {SHIP_TYPE_LIST.map((def) => (
+          <button key={def.id} className="ghost" onClick={() => setDraft([...draft, def.id])}>
+            + {def.name}
+          </button>
+        ))}
+      </div>
+      {draft.length > 0 && (
+        <>
+          <p className="quiet">Draft: {draft.map((t) => SHIP_TYPES[t].name).join(' → ')}</p>
+          <div className="fleet-buttons">
+            <button className="ghost" onClick={() => onSet(system.id, draft)}>
+              Set Standing Order
+            </button>
+            <button className="ghost" onClick={() => setDraft([])}>
+              Clear
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function BuildPanel({
   system,
   daysElapsed,
   materiel,
   manpower,
   buildQueue,
+  standingShipOrders,
   completedFocusIds,
   onBuildShip,
+  onSetStandingShipOrder,
+  onCancelStandingShipOrder,
 }: {
   system: SystemDef;
   daysElapsed: number;
   materiel: number;
   manpower: number;
   buildQueue: BuildOrder[];
+  standingShipOrders: Record<string, StandingShipOrder>;
   completedFocusIds: string[];
   onBuildShip: (systemId: string, shipType: ShipType) => void;
+  onSetStandingShipOrder: (systemId: string, sequence: ShipType[]) => void;
+  onCancelStandingShipOrder: (systemId: string) => void;
 }) {
   const queueHere = buildQueue.filter((order) => order.systemId === system.id);
   const buildMultiplier = buildTimeMultiplierFor(completedFocusIds);
@@ -243,12 +344,22 @@ function BuildPanel({
             const remaining = buildDaysOut(order, daysElapsed);
             return (
               <p key={order.id} className="quiet">
-                {def.name}, {remaining} day{remaining === 1 ? '' : 's'} remaining.
+                {def.name}, {remaining} day{remaining === 1 ? '' : 's'} remaining
+                {order.origin === 'standing' ? ' (standing order)' : ''}.
               </p>
             );
           })}
         </div>
       )}
+
+      <StandingOrderControl
+        system={system}
+        daysElapsed={daysElapsed}
+        standingOrder={standingShipOrders[system.id]}
+        queueHere={queueHere}
+        onSet={onSetStandingShipOrder}
+        onCancel={onCancelStandingShipOrder}
+      />
     </section>
   );
 }
@@ -558,6 +669,7 @@ function MilitaryTab({
   manpower,
   fleets,
   buildQueue,
+  standingShipOrders,
   trainingQueue,
   groundTroopPool,
   buildingsHere,
@@ -570,6 +682,8 @@ function MilitaryTab({
   isHostile,
   onAssignFleet,
   onBuildShip,
+  onSetStandingShipOrder,
+  onCancelStandingShipOrder,
   onTrainTroops,
   onLoadTroops,
   onCommitAttack,
@@ -626,8 +740,11 @@ function MilitaryTab({
           materiel={materiel}
           manpower={manpower}
           buildQueue={buildQueue}
+          standingShipOrders={standingShipOrders}
           completedFocusIds={completedFocusIds}
           onBuildShip={onBuildShip}
+          onSetStandingShipOrder={onSetStandingShipOrder}
+          onCancelStandingShipOrder={onCancelStandingShipOrder}
         />
       )}
 
@@ -752,6 +869,7 @@ export default function SystemPanel({
   controllerOverrides,
   fleets,
   buildQueue,
+  standingShipOrders,
   trainingQueue,
   groundTroopPool,
   buildings,
@@ -765,6 +883,8 @@ export default function SystemPanel({
   onChoose,
   onAssignFleet,
   onBuildShip,
+  onSetStandingShipOrder,
+  onCancelStandingShipOrder,
   onQueueBuilding,
   onTrainTroops,
   onLoadTroops,
@@ -842,6 +962,7 @@ export default function SystemPanel({
             manpower={manpower}
             fleets={fleets}
             buildQueue={buildQueue}
+            standingShipOrders={standingShipOrders}
             trainingQueue={trainingQueue}
             groundTroopPool={groundTroopPool}
             buildingsHere={buildingsHere}
@@ -854,6 +975,8 @@ export default function SystemPanel({
             isHostile={isHostile}
             onAssignFleet={onAssignFleet}
             onBuildShip={onBuildShip}
+            onSetStandingShipOrder={onSetStandingShipOrder}
+            onCancelStandingShipOrder={onCancelStandingShipOrder}
             onTrainTroops={onTrainTroops}
             onLoadTroops={onLoadTroops}
             onCommitAttack={onCommitAttack}

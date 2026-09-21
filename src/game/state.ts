@@ -56,6 +56,7 @@ import type {
   QueuedEffects,
   ShipType,
   Speed,
+  StandingShipOrder,
   TaxPolicy,
   TroopTrainingOrder,
 } from './types';
@@ -292,6 +293,7 @@ export function initialSession(): GameSession {
     queued: [],
     fleets: INITIAL_FLEETS,
     buildQueue: [],
+    standingShipOrders: {},
     trainingQueue: [],
     // Sol starts with a completed Shipyard so ship construction there is
     // available immediately, exactly as before buildShip started requiring
@@ -355,6 +357,7 @@ function isValidSession(value: unknown): value is GameSession {
 
   const objectFields = [
     'groundTroopPool', 'garrisons', 'groundDefenses', 'controllerOverrides', 'buildings',
+    'standingShipOrders',
   ];
   if (!objectFields.every((key) => s[key] !== null && typeof s[key] === 'object')) return false;
 
@@ -524,6 +527,7 @@ export function runClock(session: GameSession, realMs: number): GameSession {
   let queued: QueuedEffects[] = session.queued;
   let fleets = session.fleets;
   let buildQueue: BuildOrder[] = session.buildQueue;
+  let standingShipOrders: Record<string, StandingShipOrder> = session.standingShipOrders;
   let trainingQueue: TroopTrainingOrder[] = session.trainingQueue;
   let buildingQueue: BuildingOrder[] = session.buildingQueue;
   let buildings = session.buildings;
@@ -819,6 +823,55 @@ export function runClock(session: GameSession, realMs: number): GameSession {
 
     settleDueWork(boundary);
 
+    // Standing ship orders: for every system with one, if it has no
+    // standing-origin order already in flight, try to queue its sequence's
+    // next ship. Unaffordable just skips this boundary and tries again the
+    // next one — no cancellation, the same "wait, don't give up" rule
+    // building income's own system-controlled check follows. A manual
+    // order queued alongside one from a standing order never blocks, or is
+    // blocked by, this check — only an order this same mechanism queued
+    // counts as "already in flight" here.
+    for (const systemId of Object.keys(standingShipOrders)) {
+      const order = standingShipOrders[systemId];
+      const alreadyInFlight = buildQueue.some(
+        (o) => o.systemId === systemId && o.origin === 'standing',
+      );
+      if (alreadyInFlight) continue;
+
+      const system = systemById(systemId);
+      const hasShipyard = (buildings[systemId] ?? []).some((b) => b.type === 'shipyard');
+      if (!system || currentController(system, controllerOverrides) !== 'republic' || !hasShipyard) {
+        continue;
+      }
+
+      const shipType = order.sequence[order.nextIndex % order.sequence.length];
+      const def = SHIP_TYPES[shipType];
+      if (resources.materiel < def.materielCost || resources.manpower < def.manpowerCost) continue;
+
+      const shipBuildDays = Math.max(
+        1,
+        Math.round(def.buildDays * buildTimeMultiplierFor(completedFocusIds)),
+      );
+      const newOrder: BuildOrder = {
+        id: `build-${shipType}-${Math.round(boundary * 1000)}-${buildQueue.length}`,
+        systemId,
+        shipType,
+        completesOnDay: boundary + shipBuildDays,
+        origin: 'standing',
+      };
+      const cost: Effects = { materiel: -def.materielCost, manpower: -def.manpowerCost };
+      resources = applyEffects(resources, cost);
+      buildQueue = [...buildQueue, newOrder];
+      standingShipOrders = {
+        ...standingShipOrders,
+        [systemId]: { ...order, nextIndex: (order.nextIndex + 1) % order.sequence.length },
+      };
+      log.push(
+        `Day ${boundary} — ${def.name} construction begun at ${systemName(systemId)} ` +
+          `(${describeEffects(cost)}); complete in ${shipBuildDays} days. (standing order)`,
+      );
+    }
+
     // Tracked at whole day precision, the same granularity as everything
     // else settled per boundary — see APPROVAL_COLLAPSE_DAYS in gameEnd.ts.
     if (resources.approval <= 0) {
@@ -862,6 +915,7 @@ export function runClock(session: GameSession, realMs: number): GameSession {
     queued,
     fleets,
     buildQueue,
+    standingShipOrders,
     trainingQueue,
     buildingQueue,
     buildings,
@@ -888,6 +942,8 @@ export type GameAction =
   | { type: 'assignFleet'; fleetId: string; destinationId: string }
   | { type: 'mergeFleets'; fleetIds: string[]; keepFleetId: string }
   | { type: 'buildShip'; systemId: string; shipType: ShipType }
+  | { type: 'setStandingShipOrder'; systemId: string; sequence: ShipType[] }
+  | { type: 'cancelStandingShipOrder'; systemId: string }
   | { type: 'queueBuilding'; systemId: string; buildingType: BuildingType }
   | { type: 'trainTroops'; systemId: string }
   | { type: 'loadTroops'; fleetId: string }
@@ -1045,6 +1101,7 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
         systemId: action.systemId,
         shipType: action.shipType,
         completesOnDay: days + buildDays,
+        origin: 'manual',
       };
       const cost: Effects = { materiel: -def.materielCost, manpower: -def.manpowerCost };
       const log = [
@@ -1059,6 +1116,57 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
         state: { ...applyEffects(session.state, cost), log },
         buildQueue: [...session.buildQueue, order],
       };
+    }
+
+    case 'setStandingShipOrder': {
+      // Same Shipyard-and-Republic-control gate buildShip itself uses —
+      // a standing order is just an automated version of clicking Build,
+      // so it needs everything a manual click would. Setting one always
+      // replaces whatever was there before, starting the sequence over
+      // from its first entry; it never touches a ship already under
+      // construction, standing order or manual, sunk cost either way.
+      const system = systemById(action.systemId);
+      const hasShipyard = (session.buildings[action.systemId] ?? []).some((b) => b.type === 'shipyard');
+      if (
+        !system ||
+        currentController(system, session.controllerOverrides) !== 'republic' ||
+        !hasShipyard ||
+        action.sequence.length === 0
+      ) {
+        return session;
+      }
+
+      const days = session.state.daysElapsed;
+      const label = action.sequence.map((t) => SHIP_TYPES[t].name).join(' → ');
+      const log = [
+        ...session.state.log,
+        `Day ${dayLabel(days)} — Standing production order set at ` +
+          `${systemName(action.systemId)}: ${label} (repeating).`,
+      ];
+
+      return {
+        ...session,
+        state: { ...session.state, log },
+        standingShipOrders: {
+          ...session.standingShipOrders,
+          [action.systemId]: { sequence: action.sequence, nextIndex: 0 },
+        },
+      };
+    }
+
+    case 'cancelStandingShipOrder': {
+      if (!session.standingShipOrders[action.systemId]) return session;
+
+      const days = session.state.daysElapsed;
+      const log = [
+        ...session.state.log,
+        `Day ${dayLabel(days)} — Standing production order cancelled at ` +
+          `${systemName(action.systemId)}.`,
+      ];
+      const standingShipOrders = { ...session.standingShipOrders };
+      delete standingShipOrders[action.systemId];
+
+      return { ...session, state: { ...session.state, log }, standingShipOrders };
     }
 
     case 'queueBuilding': {

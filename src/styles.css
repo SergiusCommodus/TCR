@@ -606,6 +606,15 @@ body {
   border-top: 1px dashed var(--line);
 }
 
+.standing-order {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--line);
+}
+
 .focus-active-summary {
   margin: 0;
   padding: 0.5rem 0.65rem;

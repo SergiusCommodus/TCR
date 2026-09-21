@@ -195,6 +195,39 @@ Fleet is taken from the start, so the next new fleet after Second is Fourth).
 Completion is logged: "Escort construction complete at Sol, assigned to First
 Fleet." or "... forms Second Fleet."
 
+### Standing production orders
+
+Any system with a completed Shipyard can also set a repeating standing
+order instead of (or alongside) clicking Build by hand — "keep building
+Escorts" is a one-element sequence, or a longer one like Escort → Escort →
+Cruiser cycles through in order, forever. Set from the Shipyard section: pick
+ship types to build up a draft sequence (shown as a chip trail), then Set
+Standing Order; changing it later replaces the sequence outright and starts
+it over from the first entry, and Cancel removes it — neither one touches a
+ship already under construction, standing order or manual, sunk cost either
+way. `GameSession.standingShipOrders` holds at most one per system id
+(`sequence` plus `nextIndex`, the next entry due).
+
+Once set, the Shipyard refills itself: at each day boundary in `runClock`,
+for every system with a standing order that has no standing-origin
+`BuildOrder` currently in flight there, the next ship in its sequence is
+queued automatically the exact same way a manual click would (cost deducted,
+`completesOnDay` set, joins a fleet on completion) if materiel (and
+manpower, for Transport) allows — `nextIndex` only advances when a ship
+actually queues. If it can't yet afford the next one, nothing is cancelled;
+the order just waits and the same check tries again the next day boundary,
+resuming production on its own the moment it's affordable. `BuildOrder`
+carries an `origin` (`'manual'` or `'standing'`) purely so this refill check
+can find its own in-flight order without being blocked by, or blocking,
+anything the player queues by hand alongside it — the two coexist freely at
+the same system. The Shipyard section shows the active order, what it's
+currently producing and how many days remain (or that it's waiting on
+materiel), the same as any other build queue entry.
+
+Like every other build order, queueing one — by hand or automatically from a
+standing order — never touches speed, opens a panel, or interacts with the
+panel queue in any way.
+
 ## Buildings
 
 A tycoon layer under the war: each Republic controlled system has a fixed
@@ -647,7 +680,10 @@ or a message naming the problem if the saved data doesn't parse or validate
   just succeeded, a pending Directorate defend stance choice, a queue of
   panels waiting behind whichever of those is currently active
   (`queuedPanels`, promoted front first as the active one resolves — see The
-  clock above), queued delayed effects, fleets, the ship build queue, the
+  clock above), queued delayed effects, fleets, the ship build queue
+  (`buildQueue`, each order's `origin` marking it `'manual'` or `'standing'`)
+  and a repeating standing production order per system id
+  (`standingShipOrders` — see Standing production orders above), the
   ground troop training queue (`trainingQueue`) and pool (`groundTroopPool`,
   per system id), completed buildings per system id (`buildings`) and the
   buildings still under construction across every system (`buildingQueue`

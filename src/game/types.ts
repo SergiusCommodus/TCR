@@ -87,6 +87,24 @@ export interface BuildOrder {
   shipType: ShipType;
   /** Absolute day the ship joins a fleet, so it is drift free like transit. */
   completesOnDay: number;
+  /** 'standing' if a StandingShipOrder auto-queued this one rather than the
+   *  player clicking a Build button — lets the standing order's own refill
+   *  check look for its own in-flight order without being blocked by, or
+   *  blocking, anything queued manually alongside it at the same system. */
+  origin: 'manual' | 'standing';
+}
+
+/** A repeating build sequence set at a system with a completed Shipyard —
+ *  "keep building Escorts" is just a one-element sequence. Cycles through
+ *  `sequence` by `nextIndex`, auto-queuing the next ship (see runClock in
+ *  state.ts) the moment the system has no standing-origin BuildOrder still
+ *  in flight and materiel (and manpower, for Transport) allows it; if it
+ *  can't yet afford the next one, it simply waits and tries again the next
+ *  day boundary rather than canceling anything. At most one per system. */
+export interface StandingShipOrder {
+  sequence: ShipType[];
+  /** Index into sequence for whichever ship queues next. */
+  nextIndex: number;
 }
 
 /** Ground troop training under way at a system, counting down on the same
@@ -219,6 +237,10 @@ export interface GameSession {
   queued: QueuedEffects[];
   fleets: Fleet[];
   buildQueue: BuildOrder[];
+  /** A repeating ship production order per system id, sparse (a system
+   *  absent here has none) — see StandingShipOrder and the refill check in
+   *  runClock. Only ever set at a system with a completed Shipyard. */
+  standingShipOrders: Record<string, StandingShipOrder>;
   /** Ground troop training orders under way, Sol only for now — see
    *  TroopTrainingOrder and TROOP_TRAINING in troops.ts. */
   trainingQueue: TroopTrainingOrder[];

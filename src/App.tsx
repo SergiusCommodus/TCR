@@ -322,6 +322,7 @@ export default function App() {
           controllerOverrides={session.controllerOverrides}
           fleets={fleets}
           buildQueue={session.buildQueue}
+          standingShipOrders={session.standingShipOrders}
           trainingQueue={session.trainingQueue}
           groundTroopPool={session.groundTroopPool}
           buildings={session.buildings}
@@ -340,6 +341,12 @@ export default function App() {
             dispatch({ type: 'mergeFleets', fleetIds, keepFleetId })
           }
           onBuildShip={(systemId, shipType) => dispatch({ type: 'buildShip', systemId, shipType })}
+          onSetStandingShipOrder={(systemId, sequence) =>
+            dispatch({ type: 'setStandingShipOrder', systemId, sequence })
+          }
+          onCancelStandingShipOrder={(systemId) =>
+            dispatch({ type: 'cancelStandingShipOrder', systemId })
+          }
           onQueueBuilding={(systemId, buildingType) =>
             dispatch({ type: 'queueBuilding', systemId, buildingType })
           }
