@@ -21,6 +21,14 @@ export interface ShipTypeDef {
    *  materielCost. Zero for Escort and Cruiser — manpower only matters for
    *  Transport, which is crewing troops rather than a warship. */
   manpowerCost: number;
+  /** Personnel crewing one of this ship, at a realistic interstellar-warship
+   *  scale — an Escort in the dozens, a Cruiser in the thousands, a
+   *  Transport somewhere between the two. Summed across a fleet's whole
+   *  composition for its total crew (see fleetCrew below and fleetPersonnel
+   *  in casualties.ts); purely a casualty and flavor figure, no part of
+   *  combat strength math, which keeps running on the abstract strength
+   *  field above untouched. */
+  crew: number;
 }
 
 /**
@@ -43,6 +51,7 @@ export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
     strength: 1,
     groundTroopCapacity: 0,
     manpowerCost: 0,
+    crew: 60,
   },
   cruiser: {
     id: 'cruiser',
@@ -53,6 +62,7 @@ export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
     strength: 3,
     groundTroopCapacity: 0,
     manpowerCost: 0,
+    crew: 1_800,
   },
   transport: {
     id: 'transport',
@@ -63,6 +73,7 @@ export const SHIP_TYPES: Record<ShipType, ShipTypeDef> = {
     strength: 0,
     groundTroopCapacity: 2,
     manpowerCost: 8,
+    crew: 300,
   },
 };
 

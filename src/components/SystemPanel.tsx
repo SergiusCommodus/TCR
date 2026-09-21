@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { BUILDING_TYPE_LIST, BUILDING_TYPES } from '../game/buildings';
+import { fleetPersonnel, groundPersonnel, navalPersonnel } from '../game/casualties';
 import { DIRECTORATE_NAVAL_SHARE } from '../game/directorate';
 import { findEvent } from '../game/events';
 import {
@@ -15,7 +16,13 @@ import { occupationEventFor } from '../game/occupation';
 import { formatMoney, formatPopulation } from '../game/scale';
 import { SHIP_TYPE_LIST, SHIP_TYPES } from '../game/ships';
 import { STANCES, STANCE_LABEL, estimateWinChance } from '../game/stance';
-import { describeEffects, TAX_POLICIES, TAX_POLICY_LABEL, buildTimeMultiplierFor } from '../game/state';
+import {
+  dayLabel,
+  describeEffects,
+  TAX_POLICIES,
+  TAX_POLICY_LABEL,
+  buildTimeMultiplierFor,
+} from '../game/state';
 import {
   CONTROLLER_LABEL,
   HOME_SYSTEM_ID,
@@ -32,6 +39,7 @@ import type {
   BuildingOrder,
   BuildingType,
   BuildOrder,
+  CombatReport,
   Effects,
   Fleet,
   PendingCombat,
@@ -65,6 +73,10 @@ interface Props {
   /** The Directorate's abstract fleet strength — only shown once a fleet
    *  built from it has actually arrived and is engaging here. */
   directorateFleetStrength: number;
+  /** The most recently resolved engagement anywhere in the war, or null
+   *  before the first one — shown only in the Military tab of the system
+   *  it happened at (see CombatReportPanel). */
+  lastCombatReport: CombatReport | null;
   garrisons: Record<string, number>;
   groundDefenses: Record<string, number>;
   controllerOverrides: Record<string, Controller>;
@@ -123,6 +135,7 @@ interface MilitaryProps {
   pendingCombat: PendingCombat | null;
   pendingDirectorateCombat: PendingDirectorateCombat | null;
   directorateFleetStrength: number;
+  lastCombatReport: CombatReport | null;
   garrisonStrength: number;
   groundDefenseStrength: number;
   isHostile: boolean;
@@ -193,6 +206,69 @@ function CombatOrdersPanel({
           </button>
         ))}
       </div>
+    </section>
+  );
+}
+
+/**
+ * The most recently resolved engagement's casualty breakdown — own side
+ * exact, the other side's an intelligence estimate, matching the same
+ * "own always, enemy estimated" split the turn log's own casualty lines
+ * use. Shown once, right where the fight happened, replaced wholesale by
+ * whatever engagement resolves next anywhere in the war.
+ */
+function CombatReportPanel({ report }: { report: CombatReport }) {
+  return (
+    <section className="tab-section combat-report">
+      <h4>Last Engagement — Day {dayLabel(report.day)}</h4>
+      <p className="quiet">{report.headline}</p>
+      <div className="combat-sides">
+        <div className="combat-side">
+          <p className="combat-side-label">{report.ownLabel}</p>
+          <p className="quiet">
+            {formatPopulation(report.ownKilled)} killed, {formatPopulation(report.ownWounded)} wounded
+            {report.ownShipsLost > 0
+              ? `, ${report.ownShipsLost} ship${report.ownShipsLost === 1 ? '' : 's'} lost`
+              : ''}
+          </p>
+        </div>
+        <div className="combat-side combat-side-defender">
+          <p className="combat-side-label">{report.enemyLabel}</p>
+          <p className="quiet">
+            {formatPopulation(report.enemyKilled)} killed, {formatPopulation(report.enemyWounded)} wounded
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * A hostile or contested system's standing naval garrison and ground
+ * defense, shown as both the abstract strength combat resolution actually
+ * uses and a realistic personnel estimate derived from it (see
+ * navalPersonnel/groundPersonnel in casualties.ts) — the same figures an
+ * attack or invasion against this system draws its enemy casualty estimate
+ * from.
+ */
+function GarrisonPanel({
+  garrisonStrength,
+  groundDefenseStrength,
+}: {
+  garrisonStrength: number;
+  groundDefenseStrength: number;
+}) {
+  return (
+    <section className="tab-section">
+      <h4>Garrison and Ground Defense</h4>
+      <p className="quiet">
+        Naval garrison: {garrisonStrength} strength (~{formatPopulation(navalPersonnel(garrisonStrength))}{' '}
+        personnel)
+      </p>
+      <p className="quiet">
+        Ground defense: {groundDefenseStrength} strength (~
+        {formatPopulation(groundPersonnel(groundDefenseStrength))} troops)
+      </p>
     </section>
   );
 }
@@ -677,6 +753,7 @@ function MilitaryTab({
   pendingCombat,
   pendingDirectorateCombat,
   directorateFleetStrength,
+  lastCombatReport,
   garrisonStrength,
   groundDefenseStrength,
   isHostile,
@@ -729,9 +806,13 @@ function MilitaryTab({
         />
       )}
 
-      <Placeholder title="Garrison and orbital defense">
-        Ground formations, fortifications, and the local order of battle will live here.
-      </Placeholder>
+      {lastCombatReport && lastCombatReport.systemId === system.id && (
+        <CombatReportPanel report={lastCombatReport} />
+      )}
+
+      {isHostile && (
+        <GarrisonPanel garrisonStrength={garrisonStrength} groundDefenseStrength={groundDefenseStrength} />
+      )}
 
       {hasShipyard && (
         <BuildPanel
@@ -789,6 +870,9 @@ function MilitaryTab({
           <div key={fleet.id} className="fleet-order">
             <p className="fleet-name">{fleet.name} — stationed</p>
             <p className="quiet">{describeComposition(fleet.composition)}</p>
+            <p className="quiet">
+              ~{formatPopulation(fleetPersonnel(fleet.composition, fleet.groundTroops))} personnel aboard
+            </p>
 
             {capacity > 0 && (
               <p className="quiet">
@@ -864,6 +948,7 @@ export default function SystemPanel({
   pendingOccupation,
   pendingDirectorateCombat,
   directorateFleetStrength,
+  lastCombatReport,
   garrisons,
   groundDefenses,
   controllerOverrides,
@@ -899,7 +984,9 @@ export default function SystemPanel({
   const event = pendingEventId ? findEvent(pendingEventId) : undefined;
   const controller = currentController(system, controllerOverrides);
   const isHostile = controller !== 'republic';
-  const occupationEvent = pendingOccupation ? occupationEventFor(system.name) : undefined;
+  const occupationEvent = pendingOccupation
+    ? occupationEventFor(system.name, system.population)
+    : undefined;
   const buildingsHere = buildings[system.id] ?? [];
   const buildingQueueHere = buildingQueue.filter((o) => o.systemId === system.id);
 
@@ -970,6 +1057,7 @@ export default function SystemPanel({
             pendingCombat={pendingCombat}
             pendingDirectorateCombat={pendingDirectorateCombat}
             directorateFleetStrength={directorateFleetStrength}
+            lastCombatReport={lastCombatReport}
             garrisonStrength={garrisons[system.id] ?? 0}
             groundDefenseStrength={groundDefenses[system.id] ?? 0}
             isHostile={isHostile}

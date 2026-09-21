@@ -49,6 +49,8 @@ export default function App() {
     directorateFleetStrength,
     pendingDirectorateAlert,
     pendingDirectorateCombat,
+    warTotals,
+    lastCombatReport,
     gameOver,
   } = session;
 
@@ -237,6 +239,14 @@ export default function App() {
             <dt>Manpower</dt>
             <dd>{state.manpower}</dd>
           </div>
+          <div>
+            <dt>War Dead</dt>
+            <dd>
+              {formatPopulation(
+                warTotals.ownKilled + warTotals.enemyKilledEstimate + warTotals.civilianDeaths,
+              )}
+            </dd>
+          </div>
         </dl>
       </header>
 
@@ -317,6 +327,7 @@ export default function App() {
             pendingDirectorateCombat?.systemId === selected.id ? pendingDirectorateCombat : null
           }
           directorateFleetStrength={directorateFleetStrength}
+          lastCombatReport={lastCombatReport}
           garrisons={session.garrisons}
           groundDefenses={session.groundDefenses}
           controllerOverrides={session.controllerOverrides}
@@ -365,6 +376,29 @@ export default function App() {
 
       <footer className="history">
         <h2>History</h2>
+        <dl className="war-ledger" aria-label="Running war totals">
+          <div>
+            <dt>Republic dead / wounded</dt>
+            <dd>
+              {formatPopulation(warTotals.ownKilled)} / {formatPopulation(warTotals.ownWounded)}
+            </dd>
+          </div>
+          <div>
+            <dt>Republic ships lost</dt>
+            <dd>{warTotals.ownShipsLost}</dd>
+          </div>
+          <div>
+            <dt>Directorate dead / wounded (est.)</dt>
+            <dd>
+              {formatPopulation(warTotals.enemyKilledEstimate)} /{' '}
+              {formatPopulation(warTotals.enemyWoundedEstimate)}
+            </dd>
+          </div>
+          <div>
+            <dt>Civilians dead</dt>
+            <dd>{formatPopulation(warTotals.civilianDeaths)}</dd>
+          </div>
+        </dl>
         <div className="log" ref={logRef}>
           {state.log.map((line, index) => (
             <p key={index}>{line}</p>

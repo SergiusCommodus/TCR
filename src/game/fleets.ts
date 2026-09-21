@@ -100,6 +100,18 @@ export function fleetStrength(composition: ShipComposition): number {
   );
 }
 
+/** A fleet's total crew: the sum of each ship's count times its type's crew
+ *  complement — a realistic personnel figure, entirely separate from
+ *  fleetStrength above, which keeps driving combat resolution unchanged.
+ *  See fleetPersonnel in casualties.ts for crew plus embarked ground
+ *  troops together. */
+export function fleetCrew(composition: ShipComposition): number {
+  return (Object.keys(SHIP_TYPES) as ShipType[]).reduce(
+    (total, type) => total + composition[type] * SHIP_TYPES[type].crew,
+    0,
+  );
+}
+
 /** How many ground troops a fleet's Transports can carry in total — the
  *  ceiling Load Troops fills up to, not how many are actually aboard right
  *  now (that's the fleet's own groundTroops). */

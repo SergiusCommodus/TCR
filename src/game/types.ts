@@ -47,6 +47,11 @@ export interface QueuedEffects {
   dueDay: number;
   effects: Effects;
   text: string;
+  /** Civilian deaths this delayed effect accounts for, added to
+   *  GameSession.warTotals.civilianDeaths when it comes due — set only by
+   *  an occupation choice's aftermath entry (see occupationCasualtyToll in
+   *  occupation.ts), absent for every other queued effect. */
+  civilianDeaths?: number;
 }
 
 /** The three ship types available for construction. Transport carries
@@ -218,6 +223,43 @@ export interface GameEndState {
   day: number;
 }
 
+/** Running totals of the war's human and material cost, accumulated over
+ *  every combat, invasion and occupation choice for the whole game — never
+ *  reset except by starting over. Own-side figures are exact, drawn from
+ *  the actual forces and losses involved; enemy figures are always an
+ *  intelligence estimate, the same distinction the combat log itself draws,
+ *  since the Republic never gets a precise count of what it did to the
+ *  other side. Ships lost is tracked for the Republic's own fleets only —
+ *  neither a Directorate garrison nor its fleet is modeled as discrete
+ *  ships, only abstract strength, so there's nothing to count on that side. */
+export interface WarTotals {
+  ownKilled: number;
+  ownWounded: number;
+  ownShipsLost: number;
+  enemyKilledEstimate: number;
+  enemyWoundedEstimate: number;
+  civilianDeaths: number;
+}
+
+/** Personnel and ships lost on both sides of the most recently resolved
+ *  engagement — a naval attack, a naval defense, or a ground invasion —
+ *  shown as a standing result readout in the Military tab of the system it
+ *  happened at. Replaced wholesale by the next engagement anywhere in the
+ *  war, cleared by none; a stale report left showing at a quiet system is
+ *  expected and harmless. */
+export interface CombatReport {
+  day: number;
+  systemId: string;
+  headline: string;
+  ownLabel: string;
+  ownKilled: number;
+  ownWounded: number;
+  ownShipsLost: number;
+  enemyLabel: string;
+  enemyKilled: number;
+  enemyWounded: number;
+}
+
 /** 0 is paused; 1, 5, 10 and 20 are the in game days per real minute. */
 export type Speed = 0 | 1 | 5 | 10 | 20;
 
@@ -313,4 +355,9 @@ export interface GameSession {
   /** Set once, permanently, the moment a win or loss condition triggers.
    *  Every action but 'reset' is then a no-op — see the reducer wrapper. */
   gameOver: GameEndState | null;
+  /** Running human and material cost of the war so far — see WarTotals. */
+  warTotals: WarTotals;
+  /** The most recently resolved engagement's casualty report, or null before
+   *  the first one — see CombatReport. */
+  lastCombatReport: CombatReport | null;
 }

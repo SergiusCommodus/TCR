@@ -834,6 +834,30 @@ body {
   color: var(--muted);
 }
 
+.war-ledger {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.2rem;
+  margin: 0 0 0.65rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px dashed var(--line);
+}
+
+.war-ledger dt {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.war-ledger dd {
+  margin: 0;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
 .log {
   max-height: 11rem;
   overflow-y: auto;

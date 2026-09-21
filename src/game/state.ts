@@ -15,10 +15,19 @@ import {
   rollDirectorateOccupationOutcome,
 } from './directorate';
 import { BUILDING_TYPES } from './buildings';
+import {
+  addWarTotals,
+  computeCasualties,
+  describeCasualtyReport,
+  fleetPersonnel,
+  groundPersonnel,
+  INITIAL_WAR_TOTALS,
+  navalPersonnel,
+} from './casualties';
 import { EVENTS, findEvent } from './events';
 import { FOCUS_PATH } from './focuses';
 import { checkGameEnd } from './gameEnd';
-import { OCCUPATION_CHOICES } from './occupation';
+import { OCCUPATION_CHOICES, occupationCasualtyToll } from './occupation';
 import {
   applyCompositionLosses,
   applySurvivingShare,
@@ -27,6 +36,7 @@ import {
   groundTroopCapacity,
   nextFleetName,
   sumComposition,
+  totalShips,
 } from './fleets';
 import { MAT_SCALE, POP_SCALE, formatMagnitude, formatMoney, formatPopulation } from './scale';
 import { SHIP_TYPES } from './ships';
@@ -42,6 +52,7 @@ import type {
   BuildingOrder,
   BuildingType,
   BuildOrder,
+  CombatReport,
   Effects,
   EventDef,
   Fleet,
@@ -59,6 +70,7 @@ import type {
   StandingShipOrder,
   TaxPolicy,
   TroopTrainingOrder,
+  WarTotals,
 } from './types';
 
 /** At 1x, one real minute is one in game day. Speed multiplies that directly,
@@ -316,6 +328,8 @@ export function initialSession(): GameSession {
     pendingDirectorateCombat: null,
     approvalCollapseStartDay: null,
     gameOver: null,
+    warTotals: INITIAL_WAR_TOTALS,
+    lastCombatReport: null,
   };
 }
 
@@ -357,7 +371,7 @@ function isValidSession(value: unknown): value is GameSession {
 
   const objectFields = [
     'groundTroopPool', 'garrisons', 'groundDefenses', 'controllerOverrides', 'buildings',
-    'standingShipOrders',
+    'standingShipOrders', 'warTotals',
   ];
   if (!objectFields.every((key) => s[key] !== null && typeof s[key] === 'object')) return false;
 
@@ -427,24 +441,61 @@ function pickEventForDay(day: number, firedEventIds: string[]): EventDef | undef
 function applyDirectorateOccupation(
   resources: GameState,
   controllerOverrides: GameSession['controllerOverrides'],
+  queued: QueuedEffects[],
+  warTotals: WarTotals,
   systemId: string,
   logDay: number,
 ): {
   resources: GameState;
   controllerOverrides: GameSession['controllerOverrides'];
+  queued: QueuedEffects[];
+  warTotals: WarTotals;
   logLines: string[];
 } {
   const targetName = systemName(systemId);
+  const target = systemById(systemId);
   const outcomeChoice = rollDirectorateOccupationOutcome(DIRECTORATE_TRAITS.brutality);
-  const nextResources = applyEffects(resources, outcomeChoice.effects);
+  // Civilian toll computed from the target's actual population, the same
+  // formula the player's own commitOccupation uses — see
+  // occupationCasualtyToll in occupation.ts.
+  const toll = occupationCasualtyToll(target?.population ?? 0, outcomeChoice.id);
+  const immediateEffects: Effects = { ...outcomeChoice.effects, population: -toll.immediate };
+  const nextResources = applyEffects(resources, immediateEffects);
   const nextControllerOverrides = outcomeChoice.flipsControl
     ? { ...controllerOverrides, [systemId]: 'directorate' as const }
     : controllerOverrides;
   const logLines = [
     `Day ${dayLabel(logDay)} — ${outcomeChoice.label}: ${outcomeChoice.resultText(targetName)} ` +
-      `(${describeEffects(outcomeChoice.effects)})`,
+      `(${describeEffects(immediateEffects)})`,
   ];
-  return { resources: nextResources, controllerOverrides: nextControllerOverrides, logLines };
+  if (toll.immediate > 0) {
+    logLines.push(
+      `Day ${dayLabel(logDay)} — Casualties: an estimated ${formatMagnitude(toll.immediate)} ` +
+        `civilians dead at ${targetName}.`,
+    );
+  }
+  const nextQueued =
+    toll.aftermath > 0
+      ? [
+          ...queued,
+          {
+            dueDay: logDay + toll.aftermathDays,
+            effects: { population: -toll.aftermath },
+            text:
+              `Aftermath at ${targetName}: the confirmed toll from ${outcomeChoice.label.toLowerCase()} ` +
+              `climbs to an estimated ${formatMagnitude(toll.immediate + toll.aftermath)} dead.`,
+            civilianDeaths: toll.aftermath,
+          },
+        ]
+      : queued;
+  const nextWarTotals = addWarTotals(warTotals, { civilianDeaths: toll.immediate });
+  return {
+    resources: nextResources,
+    controllerOverrides: nextControllerOverrides,
+    queued: nextQueued,
+    warTotals: nextWarTotals,
+    logLines,
+  };
 }
 
 /** Defensive stance never lets a loss wipe the fleet outright — if every
@@ -541,6 +592,8 @@ export function runClock(session: GameSession, realMs: number): GameSession {
   let directorateNextCheckDay = session.directorateNextCheckDay;
   let directorateAttack = session.directorateAttack;
   let approvalCollapseStartDay = session.approvalCollapseStartDay;
+  let warTotals = session.warTotals;
+  let lastCombatReport = session.lastCombatReport;
   let days = session.state.daysElapsed;
   // Carried forward, not reset: none of these stop the walk anymore, so
   // whatever was already active or queued must survive this call rather
@@ -598,6 +651,9 @@ export function runClock(session: GameSession, realMs: number): GameSession {
       queued = queued.filter((q) => q.dueDay > atDay);
       for (const entry of due) {
         resources = applyEffects(resources, entry.effects);
+        if (entry.civilianDeaths) {
+          warTotals = addWarTotals(warTotals, { civilianDeaths: entry.civilianDeaths });
+        }
         // Labelled with the day it came due, not the day it was noticed: a
         // single long tick can settle several days at once.
         log.push(`Day ${dayLabel(entry.dueDay)} — ${entry.text} (${describeEffects(entry.effects)})`);
@@ -770,6 +826,42 @@ export function runClock(session: GameSession, realMs: number): GameSession {
             `${outcome.attackerWins ? 'The Directorate fleet breaks through.' : 'The Republic defense holds.'}`,
         );
 
+        // Casualties: the local garrison is Republic-held territory's own
+        // force, so its losses count as "own" the same as anywhere else,
+        // even with no player fleet present to fight alongside it.
+        const directorateForcePersonnel = navalPersonnel(navalStrength) + groundPersonnel(groundTroops);
+        const directorateCasualties = computeCasualties(
+          directorateForcePersonnel,
+          outcome.attackerLossFraction,
+        );
+        const localGarrisonCasualties = computeCasualties(
+          navalPersonnel(defenderStrength),
+          outcome.defenderLossFraction,
+        );
+        log.push(
+          `Day ${dayLabel(attack.arrivalDay)} — Casualties: ${targetName}'s local garrison loses ` +
+            `${describeCasualtyReport(localGarrisonCasualties)}; the Directorate fleet takes an ` +
+            `estimated ${describeCasualtyReport(directorateCasualties)}.`,
+        );
+        warTotals = addWarTotals(warTotals, {
+          ownKilled: localGarrisonCasualties.killed,
+          ownWounded: localGarrisonCasualties.wounded,
+          enemyKilledEstimate: directorateCasualties.killed,
+          enemyWoundedEstimate: directorateCasualties.wounded,
+        });
+        lastCombatReport = {
+          day: attack.arrivalDay,
+          systemId: attack.systemId,
+          headline: `${NAVAL_INTELLIGENCE} report: ${targetName}`,
+          ownLabel: 'Local garrison',
+          ownKilled: localGarrisonCasualties.killed,
+          ownWounded: localGarrisonCasualties.wounded,
+          ownShipsLost: 0,
+          enemyLabel: 'Directorate fleet (estimated)',
+          enemyKilled: directorateCasualties.killed,
+          enemyWounded: directorateCasualties.wounded,
+        };
+
         if (outcome.attackerWins) {
           // Even a winning attacker takes proportional losses, same as the
           // player's own commitAttack; the survivors are what remains of the
@@ -781,11 +873,15 @@ export function runClock(session: GameSession, realMs: number): GameSession {
           const result = applyDirectorateOccupation(
             resources,
             controllerOverrides,
+            queued,
+            warTotals,
             attack.systemId,
             attack.arrivalDay,
           );
           resources = result.resources;
           controllerOverrides = result.controllerOverrides;
+          queued = result.queued;
+          warTotals = result.warTotals;
           log.push(...result.logLines);
         } else {
           // A defensive win costs the Directorate its committed fleet
@@ -934,6 +1030,8 @@ export function runClock(session: GameSession, realMs: number): GameSession {
     pendingDirectorateCombat,
     queuedPanels,
     approvalCollapseStartDay,
+    warTotals,
+    lastCombatReport,
   };
 }
 
@@ -1312,6 +1410,24 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
       if (defensiveLossRetreat) survivors = guaranteeSurvivor(survivors, fleet.composition);
       const survivingStrength = fleetStrength(survivors);
 
+      // Casualties: computed from the forces actually engaged and the same
+      // stance-modified loss fractions combat resolution already produced —
+      // own side exact (real crew and embarked troops), the garrison's an
+      // intelligence estimate from its abstract defense strength.
+      const attackerPersonnelBefore = fleetPersonnel(fleet.composition, fleet.groundTroops);
+      const attackerCasualties = computeCasualties(attackerPersonnelBefore, outcome.attackerLossFraction);
+      const attackerShipsLost = totalShips(fleet.composition) - totalShips(survivors);
+      const defenderCasualties = computeCasualties(
+        navalPersonnel(defenderStrength),
+        outcome.defenderLossFraction,
+      );
+      log.push(
+        `Day ${dayLabel(days)} — Casualties: ${fleet.name} loses ` +
+          `${describeCasualtyReport(attackerCasualties)}` +
+          `${attackerShipsLost > 0 ? ` (${attackerShipsLost} ship${attackerShipsLost === 1 ? '' : 's'} lost)` : ''}; ` +
+          `the garrison takes an estimated ${describeCasualtyReport(defenderCasualties)}.`,
+      );
+
       let fleets: Fleet[];
       if (survivingStrength <= 0) {
         fleets = session.fleets.filter((f) => f.id !== fleet.id);
@@ -1373,6 +1489,25 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
         state: { ...session.state, log },
         fleets,
         garrisons: { ...session.garrisons, [pending.systemId]: garrisonAfter },
+        warTotals: addWarTotals(session.warTotals, {
+          ownKilled: attackerCasualties.killed,
+          ownWounded: attackerCasualties.wounded,
+          ownShipsLost: attackerShipsLost,
+          enemyKilledEstimate: defenderCasualties.killed,
+          enemyWoundedEstimate: defenderCasualties.wounded,
+        }),
+        lastCombatReport: {
+          day: days,
+          systemId: pending.systemId,
+          headline: `Battle of ${systemName(pending.systemId)}`,
+          ownLabel: fleet.name,
+          ownKilled: attackerCasualties.killed,
+          ownWounded: attackerCasualties.wounded,
+          ownShipsLost: attackerShipsLost,
+          enemyLabel: 'Garrison (estimated)',
+          enemyKilled: defenderCasualties.killed,
+          enemyWounded: defenderCasualties.wounded,
+        },
         ...promoteNextPanel(session.queuedPanels),
       };
     }
@@ -1384,6 +1519,7 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
       const days = session.state.daysElapsed;
       const targetName = systemName(pending.systemId);
       const defendingFleets = session.fleets.filter((f) => f.location === pending.systemId);
+      const defendingFleetIds = new Set(defendingFleets.map((f) => f.id));
       const defenderStrength = defendingFleets.reduce(
         (sum, f) => sum + fleetStrength(f.composition),
         0,
@@ -1446,15 +1582,55 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
         });
       }
 
+      // Casualties: own side is the defending fleet(s)' exact crew and
+      // embarked troops before this engagement; the Directorate fleet's is
+      // an intelligence estimate from its abstract strength, same as its
+      // ground troops "aboard" figure already narrated above.
+      const defenderPersonnelBefore = defendingFleets.reduce(
+        (sum, f) => sum + fleetPersonnel(f.composition, f.groundTroops),
+        0,
+      );
+      const defenderCasualties = computeCasualties(defenderPersonnelBefore, republicLossFraction);
+      const directorateForcePersonnel = navalPersonnel(navalStrength) + groundPersonnel(groundTroops);
+      const directorateCasualties = computeCasualties(directorateForcePersonnel, directorateLossFraction);
+      const defenderShipsBefore = totalShips(sumComposition(defendingFleets));
+      const defenderShipsAfter = totalShips(
+        sumComposition(fleets.filter((f) => defendingFleetIds.has(f.id))),
+      );
+      const defenderShipsLost = defenderShipsBefore - defenderShipsAfter;
+      log.push(
+        `Day ${dayLabel(days)} — Casualties: the defending fleet loses ` +
+          `${describeCasualtyReport(defenderCasualties)}` +
+          `${defenderShipsLost > 0 ? ` (${defenderShipsLost} ship${defenderShipsLost === 1 ? '' : 's'} lost)` : ''}; ` +
+          `the Directorate fleet takes an estimated ${describeCasualtyReport(directorateCasualties)}.`,
+      );
+
       let directorateFleetStrength = session.directorateFleetStrength;
       let controllerOverrides = session.controllerOverrides;
       let resources = session.state;
+      let queued = session.queued;
+      let warTotals = addWarTotals(session.warTotals, {
+        ownKilled: defenderCasualties.killed,
+        ownWounded: defenderCasualties.wounded,
+        ownShipsLost: defenderShipsLost,
+        enemyKilledEstimate: directorateCasualties.killed,
+        enemyWoundedEstimate: directorateCasualties.wounded,
+      });
 
       if (!republicWins) {
         directorateFleetStrength = applySurvivingShare(directorateFleetStrength, directorateLossFraction);
-        const result = applyDirectorateOccupation(resources, controllerOverrides, pending.systemId, days);
+        const result = applyDirectorateOccupation(
+          resources,
+          controllerOverrides,
+          queued,
+          warTotals,
+          pending.systemId,
+          days,
+        );
         resources = result.resources;
         controllerOverrides = result.controllerOverrides;
+        queued = result.queued;
+        warTotals = result.warTotals;
         log.push(...result.logLines);
       } else {
         directorateFleetStrength = 0;
@@ -1467,6 +1643,20 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
         fleets,
         directorateFleetStrength,
         controllerOverrides,
+        queued,
+        warTotals,
+        lastCombatReport: {
+          day: days,
+          systemId: pending.systemId,
+          headline: `Defense of ${targetName}`,
+          ownLabel: 'Defending fleet',
+          ownKilled: defenderCasualties.killed,
+          ownWounded: defenderCasualties.wounded,
+          ownShipsLost: defenderShipsLost,
+          enemyLabel: 'Directorate fleet (estimated)',
+          enemyKilled: directorateCasualties.killed,
+          enemyWounded: directorateCasualties.wounded,
+        },
         ...promoteNextPanel(session.queuedPanels),
       };
     }
@@ -1510,13 +1700,56 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
           `${outcome.attackerWins ? `${fleet.name} secures a foothold on the surface.` : 'The landing is thrown back.'}`,
       ];
 
+      // Casualties: own side (the landing force) is exact, converted from
+      // its abstract ground troop strength the same way a defender's is —
+      // Fleet.groundTroops and a system's ground defense are the same kind
+      // of number, so both sides read on the same personnel scale.
+      const attackerCasualties = computeCasualties(
+        groundPersonnel(attackerStrength),
+        outcome.attackerLossFraction,
+      );
+      const defenderCasualties = computeCasualties(
+        groundPersonnel(defenderStrength),
+        outcome.defenderLossFraction,
+      );
+      log.push(
+        `Day ${dayLabel(days)} — Casualties: the landing force loses ` +
+          `${describeCasualtyReport(attackerCasualties)}; ${systemName(systemId)}'s defense takes ` +
+          `an estimated ${describeCasualtyReport(defenderCasualties)}.`,
+      );
+
       const fleets = session.fleets.map((f) =>
         f.id === fleet.id ? { ...f, groundTroops: survivingTroops } : f,
       );
       const groundDefenses = { ...session.groundDefenses, [systemId]: defenseAfter };
+      const warTotals = addWarTotals(session.warTotals, {
+        ownKilled: attackerCasualties.killed,
+        ownWounded: attackerCasualties.wounded,
+        enemyKilledEstimate: defenderCasualties.killed,
+        enemyWoundedEstimate: defenderCasualties.wounded,
+      });
+      const lastCombatReport: CombatReport = {
+        day: days,
+        systemId,
+        headline: `Invasion of ${systemName(systemId)}`,
+        ownLabel: 'Landing force',
+        ownKilled: attackerCasualties.killed,
+        ownWounded: attackerCasualties.wounded,
+        ownShipsLost: 0,
+        enemyLabel: 'Defense (estimated)',
+        enemyKilled: defenderCasualties.killed,
+        enemyWounded: defenderCasualties.wounded,
+      };
 
       if (!outcome.attackerWins) {
-        return { ...session, state: { ...session.state, log }, fleets, groundDefenses };
+        return {
+          ...session,
+          state: { ...session.state, log },
+          fleets,
+          groundDefenses,
+          warTotals,
+          lastCombatReport,
+        };
       }
 
       return {
@@ -1524,6 +1757,8 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
         state: { ...session.state, log },
         fleets,
         groundDefenses,
+        warTotals,
+        lastCombatReport,
         // Forced to 0 here, not left for the next tick to catch: the clock's
         // own hard pause on pendingOccupation only refuses to advance time,
         // it never zeroes speed by itself, so a fast invasion right after a
@@ -1541,21 +1776,50 @@ function reducerCore(session: GameSession, action: GameAction): GameSession {
       if (!choice) return session;
 
       const days = session.state.daysElapsed;
+      const target = systemById(pending.systemId);
       const name = systemName(pending.systemId);
+      // Civilian toll computed from the target's actual population — see
+      // occupationCasualtyToll in occupation.ts.
+      const toll = occupationCasualtyToll(target?.population ?? 0, choice.id);
+      const immediateEffects: Effects = { ...choice.effects, population: -toll.immediate };
+
       const log = [
         ...session.state.log,
         `Day ${dayLabel(days)} — ${choice.label}: ${choice.resultText(name)} ` +
-          `(${describeEffects(choice.effects)})`,
+          `(${describeEffects(immediateEffects)})`,
       ];
+      if (toll.immediate > 0) {
+        log.push(
+          `Day ${dayLabel(days)} — Casualties: an estimated ${formatMagnitude(toll.immediate)} ` +
+            `civilians dead at ${name}.`,
+        );
+      }
 
       const controllerOverrides = choice.flipsControl
         ? { ...session.controllerOverrides, [pending.systemId]: 'republic' as const }
         : session.controllerOverrides;
 
+      const queued =
+        toll.aftermath > 0
+          ? [
+              ...session.queued,
+              {
+                dueDay: days + toll.aftermathDays,
+                effects: { population: -toll.aftermath },
+                text:
+                  `Aftermath at ${name}: the confirmed toll from ${choice.label.toLowerCase()} ` +
+                  `climbs to an estimated ${formatMagnitude(toll.immediate + toll.aftermath)} dead.`,
+                civilianDeaths: toll.aftermath,
+              },
+            ]
+          : session.queued;
+
       return {
         ...session,
-        state: { ...applyEffects(session.state, choice.effects), log },
+        state: { ...applyEffects(session.state, immediateEffects), log },
         controllerOverrides,
+        queued,
+        warTotals: addWarTotals(session.warTotals, { civilianDeaths: toll.immediate }),
         pendingOccupation: null,
       };
     }

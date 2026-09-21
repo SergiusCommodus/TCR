@@ -414,16 +414,16 @@ the defense.
 A won invasion opens an Occupation Decision, still hard pausing the clock —
 the one panel that does, since it settles a fight that already happened
 rather than something still unfolding: four choices in `src/game/occupation.ts`
-— Bombard, Enslave and
-Deport, Exterminate, Occupy and Govern — each with a population and approval
-effect (there is no per-system population tracked, so the consequence is
-narrated as falling on the taken system while mechanically landing on the
-same national totals every other choice in the game already uses). Bombard
-and Exterminate are the most severe on population, Enslave and Deport falls
-between, Occupy and Govern is the least severe and the only one that costs
-the Republic nothing in approval — the other three cost it, on the read that
-a nominally democratic Republic pays a political price for atrocity even in
-wartime. Only Occupy and Govern flips the system to Republic control,
+— Bombard, Enslave and Deport, Exterminate, Occupy and Govern — each with an
+approval effect, plus a population toll computed from the *target system's*
+own `SystemDef.population` rather than a flat number (see Casualties below)
+and applied to the same national totals every other choice in the game
+already uses. Bombard and Exterminate are the most severe on population,
+Enslave and Deport falls between, Occupy and Govern is the least severe and
+the only one that costs the Republic nothing in approval — the other three
+cost it, on the read that a nominally democratic Republic pays a political
+price for atrocity even in wartime. Only Occupy and Govern flips the system
+to Republic control,
 recorded in `GameSession.controllerOverrides` (a system's live controller,
 versus its static `SystemDef.controller` baseline — the same split pattern
 again). The other three leave the system un-flipped: population devastated
@@ -436,6 +436,70 @@ A system's live controller, not its static baseline, is what decides
 whether an arriving fleet triggers combat at all — a system Occupy and
 Govern has already flipped no longer opens a combat panel for a later
 arrival.
+
+## Casualties
+
+Military forces are scaled to realistic personnel figures, layered on top of
+the abstract `strength` numbers that still drive every combat roll unchanged
+— the same "keep the balance math untouched, add a realistic figure
+alongside it" approach the economy rescale used for materiel and population.
+`src/game/casualties.ts` holds the conversion: `NAVAL_PERSONNEL_PER_STRENGTH`
+(20,000) and `GROUND_PERSONNEL_PER_STRENGTH` (120,000) turn a garrison's,
+Directorate fleet's, ground defense's, or landing force's abstract strength
+into a personnel estimate — tens of thousands for a frontier garrison, up
+toward the low millions for a heavily defended world's ground forces.
+Every ship type in `src/game/ships.ts` also carries a realistic `crew`
+complement — Escort 60, Cruiser 1,800, Transport 300 — summed across a
+fleet's composition (`fleetCrew` in `src/game/fleets.ts`) and combined with
+its embarked ground troops (converted the same way a defender's are) for a
+fleet's total personnel (`fleetPersonnel` in `casualties.ts`), shown per
+stationed fleet in the Military tab and per hostile system's Garrison and
+Ground Defense section.
+
+Every combat resolution — `commitAttack`, `commitDirectorateDefense`,
+`commitInvasion`, and the Directorate's own undefended auto-resolve in
+`runClock` — computes casualties from the personnel actually engaged and the
+same stance-modified `lossFraction` combat resolution already produces
+(`computeCasualties` in `casualties.ts`): personnel lost is
+`personnel × lossFraction`, split 55% killed / 30% wounded (the remaining
+15% missing or captured, not tracked separately). A bigger force pays a
+bigger price for the same fractional loss, and a more decisive fight (a
+rout, `lossFraction` near 1) costs far more than a near-even one — nothing
+flat or placeholder about it. Own-side figures (a player fleet's exact crew
+and embarked troops) are always precise; the other side's are always framed
+as an intelligence estimate, matching how little the Republic could actually
+know about what it did to a Directorate force or a system's garrison.
+
+Each engagement logs a `Day N — Casualties: ...` line immediately after its
+battle line — killed, wounded, and ships lost (own side only; neither a
+garrison nor the Directorate's fleet is modeled as discrete ships, only
+abstract strength) for the player's own force, and an estimated killed/
+wounded figure for the other side — and is also kept as
+`GameSession.lastCombatReport`, rendered as a standing "Last Engagement"
+card in the Military tab of whichever system it happened at (replaced
+wholesale by the next engagement anywhere). Every figure also folds into
+`GameSession.warTotals` — Republic killed/wounded/ships lost, Directorate
+killed/wounded (estimated), and civilians dead — a running total that never
+resets except by starting over, shown as a War Dead figure in the status bar
+and broken out in full in a War Ledger above the turn log.
+
+Occupation casualties (`occupationCasualtyToll` in `src/game/occupation.ts`)
+work the same way but read the *target system's* own `SystemDef.population`
+rather than a strength figure: each of the four occupation choices has an
+`immediateRate` (civilians killed the moment the choice lands) and a smaller
+`aftermathRate` (a further toll over the following days — exposure, disease,
+reprisal) with its own delay. The immediate toll applies at once, exactly
+like every other occupation effect, and is logged and added to
+`warTotals.civilianDeaths` right away; the aftermath toll is queued as a
+`GameSession.queued` delayed effect (the same mechanism conscription's
+payoff and every other delayed effect already uses, now carrying an optional
+`civilianDeaths` count `settleDueWork` adds to `warTotals` when it comes
+due) and reported in its own "Aftermath at `<system>`" log line days later —
+an ongoing notice, not a figure shown once and dropped. Bombarding or
+exterminating a system of a few million people costs far fewer lives than
+doing the same to a multi-billion-person core world; the toll scales with
+whichever system was actually taken, not a flat number every system shared
+before this.
 
 ## Manpower and tax policy
 
@@ -692,8 +756,10 @@ or a message naming the problem if the saved data doesn't parse or validate
   National
   Focus progress (`completedFocusIds`, `activeFocus`), the Directorate's own
   fleet strength, next check day, in-flight attack and pending alert, the
-  approval collapse tracker (`approvalCollapseStartDay`), and `gameOver` once
-  a win or loss condition has triggered.
+  approval collapse tracker (`approvalCollapseStartDay`), the running war
+  cost (`warTotals` — see Casualties above) and most recent engagement's
+  breakdown (`lastCombatReport`), and `gameOver` once a win or loss condition
+  has triggered.
 
 `Effects` deliberately excludes `daysElapsed`: time comes from the clock, never
 from a choice's deltas.
@@ -729,15 +795,16 @@ themselves, and how they're displayed, changed. Both constants live in
 from every file (events, occupation, focuses, ships, troops) that needs
 them to scale its own literals, and a two way import would be circular.
 
-Population also gained a per-system dimension, but only as flavor: each
-`SystemDef` in `src/game/systems.ts` now carries a static `population` —
-Sol, the capital, at 2.8B; small colonies and the forward naval station at
-Anchorage from 3M to 240M — shown in every system panel's header regardless
-of controller. It plays no part in game logic: it never feeds the national
-`GameState.population` total and no effect reads or writes it, the same way
-a Republic system's absent `garrisonStrength` isn't summed into anything
-either. Garrison and Ground Defense stay hostile-system-only in that same
-header, unchanged.
+Population also gained a per-system dimension: each `SystemDef` in
+`src/game/systems.ts` now carries a static `population` — Sol, the capital,
+at 2.8B; small colonies and the forward naval station at Anchorage from 3M
+to 240M — shown in every system panel's header regardless of controller. It
+never feeds the national `GameState.population` total, the same way a
+Republic system's absent `garrisonStrength` isn't summed into anything
+either — but it is read by one thing: an occupation choice's civilian toll
+is computed from the taken system's own population rather than a flat
+number (see Casualties above). Garrison and Ground Defense stay
+hostile-system-only in that same header, unchanged.
 
 `src/game/systems.ts` holds the six systems plus an `EVENT_SCOPE` map from
 event id to system id or `'global'`, keeping event content free of layout
@@ -756,11 +823,11 @@ concerns. An event id missing from that map falls back to `'global'`.
 - `src/game/buildings.ts` — `BUILDING_TYPES`: cost, build time and daily
   effect per building type.
 - `src/game/fleets.ts` — transit, naming and composition helpers shared by
-  the map and the panel, including `groundTroopCapacity`.
+  the map and the panel, including `groundTroopCapacity` and `fleetCrew`.
 - `src/game/travel.ts` — the per-pair travel time table and lane list.
-- `src/game/ships.ts` — ship type data: cost, build time and strength per
-  type; Transport's `groundTroopCapacity` is carrying capacity only, no
-  longer troops granted on completion.
+- `src/game/ships.ts` — ship type data: cost, build time, strength and crew
+  complement per type; Transport's `groundTroopCapacity` is carrying
+  capacity only, no longer troops granted on completion.
 - `src/game/troops.ts` — `TROOP_TRAINING`, the cost, time and batch size for
   training ground troops directly, independent of Transports.
 - `src/game/combat.ts` — the pure combat roll: strength, variance, losses.
@@ -768,8 +835,12 @@ concerns. An event id missing from that map falls back to `'global'`.
   optional parameter (default the original ±20%) so a stance can override it.
 - `src/game/stance.ts` — the three combat stances, their modifiers,
   `estimateWinChance` and `resolveStanceCombat`, wrapping `rollCombat`.
-- `src/game/occupation.ts` — the four occupation choices and the synthetic
-  `EventDef` that lets DecisionCard render them.
+- `src/game/casualties.ts` — personnel-per-strength conversion, `fleetPersonnel`,
+  `computeCasualties`, and the running `WarTotals` accumulator — see
+  Casualties above.
+- `src/game/occupation.ts` — the four occupation choices, `occupationCasualtyToll`
+  (see Casualties above), and the synthetic `EventDef` that lets DecisionCard
+  render them.
 - `src/game/focuses.ts` — the eleven National Focus definitions: name,
   description, days, leadership cost, narrated log lines, and effects.
 - `src/game/directorate.ts` — Directorate traits, fleet strength growth,
